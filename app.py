@@ -13,8 +13,8 @@ import matplotlib.pyplot as plt
 # -----------------------
 st.title("Urban Pollution Prediction 🚦")
 st.markdown(
-    "Predict AQI using environmental data and visualize feature importance (SHAP) dynamically "
-    "for your selected inputs."
+    "Predict AQI using environmental data and visualize feature importance dynamically. "
+    "Toggle between Global (overall) and Local (input-specific) SHAP explanations."
 )
 
 # -----------------------
@@ -81,23 +81,32 @@ for col in X.columns:
         val = st.slider(f"{col}", float(X[col].min()), float(X[col].max()), float(X[col].mean()))
         input_data[col] = val
 
-# Convert inputs to DataFrame
 input_df = pd.DataFrame([input_data])
 prediction = model.predict(input_df)[0]
 st.success(f"Predicted AQI: {prediction:.2f}")
 
 # -----------------------
-# SHAP per-input explanation
+# Global vs Local SHAP toggle
 # -----------------------
-st.subheader("Feature Contribution (SHAP) for this Prediction")
+st.subheader("Feature Importance (SHAP)")
+
+shap_option = st.radio(
+    "Select SHAP Type:",
+    ["Local (for this input)", "Global (overall)"]
+)
 
 explainer = shap.Explainer(model)
-shap_values_input = explainer(input_df)
 
-# Force matplotlib backend for Streamlit
-fig, ax = plt.subplots(figsize=(10, 6))
-shap.plots.bar(shap_values_input, show=False)
-st.pyplot(fig, bbox_inches='tight')
+if shap_option == "Local (for this input)":
+    shap_values = explainer(input_df)
+    fig, ax = plt.subplots(figsize=(10, 6))
+    shap.plots.bar(shap_values, show=False)
+    st.pyplot(fig, bbox_inches='tight')
+else:  # Global
+    shap_values = explainer(X_test)
+    fig, ax = plt.subplots(figsize=(10, 6))
+    shap.summary_plot(shap_values, X_test, show=False)
+    st.pyplot(fig, bbox_inches='tight')
 
 # -----------------------
 # Sample predictions
