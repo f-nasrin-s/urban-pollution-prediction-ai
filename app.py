@@ -7,6 +7,7 @@ from sklearn.model_selection import train_test_split
 from sklearn.preprocessing import LabelEncoder
 import shap
 import matplotlib.pyplot as plt
+import io
 
 # -----------------------
 # Title
@@ -81,6 +82,7 @@ for col in X.columns:
         val = st.slider(f"{col}", float(X[col].min()), float(X[col].max()), float(X[col].mean()))
         input_data[col] = val
 
+# Convert inputs to DataFrame
 input_df = pd.DataFrame([input_data])
 prediction = model.predict(input_df)[0]
 st.success(f"Predicted AQI: {prediction:.2f}")
@@ -107,6 +109,34 @@ else:  # Global
     fig, ax = plt.subplots(figsize=(10, 6))
     shap.summary_plot(shap_values, X_test, show=False)
     st.pyplot(fig, bbox_inches='tight')
+
+# -----------------------
+# Download Prediction & SHAP
+# -----------------------
+st.subheader("Download Prediction & SHAP Values")
+
+# Prepare data for download
+shap_df = pd.DataFrame({
+    "Feature": X.columns,
+    "Value": input_df.iloc[0].values,
+    "SHAP_value": shap_values.values[0] if shap_option=="Local (for this input)" else np.nan
+})
+
+# Add predicted AQI at the top
+shap_df.loc[-1] = ["Predicted AQI", prediction, np.nan]  # add row at top
+shap_df.index = shap_df.index + 1
+shap_df = shap_df.sort_index()
+
+# Convert to CSV in memory
+csv_buffer = io.StringIO()
+shap_df.to_csv(csv_buffer, index=False)
+
+st.download_button(
+    label="Download CSV",
+    data=csv_buffer.getvalue(),
+    file_name="aqi_prediction_shap.csv",
+    mime="text/csv"
+)
 
 # -----------------------
 # Sample predictions
