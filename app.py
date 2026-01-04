@@ -1,6 +1,6 @@
 # ==============================
 # Urban Pollution Prediction App
-# Map-Click Location Detection Version
+# Interactive Map Click Version
 # ==============================
 
 import streamlit as st
@@ -20,6 +20,10 @@ from sklearn.metrics import mean_absolute_error, r2_score
 from streamlit_autorefresh import st_autorefresh
 from geopy.geocoders import Nominatim
 
+# NEW: folium map
+from streamlit_folium import st_folium
+import folium
+
 # -------------------------------
 # AUTO REFRESH
 # -------------------------------
@@ -30,7 +34,7 @@ st_autorefresh(interval=60 * 1000, key="refresh")
 # -------------------------------
 st.set_page_config(page_title="Urban AQI Map Prediction", layout="wide")
 st.title("Urban Pollution Prediction 🚦")
-st.write("ML-powered AQI prediction with live data and map click location")
+st.write("ML-powered AQI prediction with live data and interactive map click location")
 
 ist = pytz.timezone("Asia/Kolkata")
 st.caption(f"⏱️ Last updated at {datetime.now(ist).strftime('%H:%M:%S IST')}")
@@ -68,164 +72,132 @@ model = XGBRegressor(
 model.fit(X_train, y_train)
 
 # -------------------------------
-# USER SELECT LOCATION ON MAP
+# INTERACTIVE MAP CLICK
 # -------------------------------
-st.subheader("🗺️ Click on Map to Select Location")
+st.subheader("🗺️ Click on the Map to Select Location")
 
-# Default coordinates (central India)
-default_lat, default_lon = 20.5937, 78.9629
-map_df = pd.DataFrame({"lat": [default_lat], "lon": [default_lon]})
-selected_point = st.map(map_df, zoom=4)
+# Default map
+m = folium.Map(location=[20.5937, 78.9629], zoom_start=5)
 
-st.info("Click on the map to select a location below:")
+# Display map and capture clicks
+map_data = st_folium(m, width=700, height=500)
 
-clicked_lat = st.number_input("Latitude", value=default_lat, format="%.5f")
-clicked_lon = st.number_input("Longitude", value=default_lon, format="%.5f")
+if map_data and map_data.get("last_clicked"):
+    clicked_lat = map_data["last_clicked"]["lat"]
+    clicked_lon = map_data["last_clicked"]["lng"]
 
-# -------------------------------
-# DETECT CITY FROM COORDINATES
-# -------------------------------
-geolocator = Nominatim(user_agent="aqi_map_app")
-place = geolocator.reverse((clicked_lat, clicked_lon), language="en")
-city = (
-    place.raw["address"].get("city")
-    or place.raw["address"].get("town")
-    or place.raw["address"].get("state")
-    or "Unknown"
-)
-st.info(f"📌 Detected City: {city}")
+    st.success(f"Selected Location: {clicked_lat:.4f}, {clicked_lon:.4f}")
 
-# -------------------------------
-# LIVE AQI FROM API
-# -------------------------------
-API_KEY = st.secrets.get("OPENWEATHER_API_KEY", "")
+    # -------------------------------
+    # AUTO CITY DETECTION
+    # -------------------------------
+    geolocator = Nominatim(user_agent="aqi_map_app")
+    place = geolocator.reverse((clicked_lat, clicked_lon), language="en")
+    city = (
+        place.raw["address"].get("city")
+        or place.raw["address"].get("town")
+        or place.raw["address"].get("state")
+        or "Unknown"
+    )
+    st.info(f"📌 Detected City: {city}")
 
-if API_KEY:
-    url = f"https://api.openweathermap.org/data/2.5/air_pollution?lat={clicked_lat}&lon={clicked_lon}&appid={API_KEY}"
-    res = requests.get(url).json()
-    components = res["list"][0]["components"]
+    # -------------------------------
+    # LIVE AQI FROM API
+    # -------------------------------
+    API_KEY = st.secrets.get("OPENWEATHER_API_KEY", "")
 
-    pm25 = components["pm2_5"]
-    pm10 = components["pm10"]
+    if API_KEY:
+        url = f"https://api.openweathermap.org/data/2.5/air_pollution?lat={clicked_lat}&lon={clicked_lon}&appid={API_KEY}"
+        res = requests.get(url).json()
+        components = res["list"][0]["components"]
 
-    st.metric("PM2.5", pm25)
-    st.metric("PM10", pm10)
+        pm25 = components["pm2_5"]
+        pm10 = components["pm10"]
 
-# -------------------------------
-# ML PREDICTION
-# -------------------------------
-live_input = {}
+        st.metric("PM2.5", pm25)
+        st.metric("PM10", pm10)
 
-for col in X.columns:
-    if col == "PM2.5":
-        live_input[col] = pm25
-    elif col == "PM10":
-        live_input[col] = pm10
-    elif col in label_encoders:
-        live_input[col] = label_encoders[col].transform(
-            [label_encoders[col].classes_[0]]
-        )[0]
-    else:
-        live_input[col] = X[col].mean()
+        # -------------------------------
+        # ML PREDICTION
+        # -------------------------------
+        live_input = {}
 
-live_df = pd.DataFrame([live_input])
-prediction = model.predict(live_df)[0]
+        for col in X.columns:
+            if col == "PM2.5":
+                live_input[col] = pm25
+            elif col == "PM10":
+                live_input[col] = pm10
+            elif col in label_encoders:
+                live_input[col] = label_encoders[col].transform(
+                    [label_encoders[col].classes_[0]]
+                )[0]
+            else:
+                live_input[col] = X[col].mean()
 
-# -------------------------------
-# AQI LABEL
-# -------------------------------
-def aqi_label(val):
-    if val <= 50:
-        return "Good", "🟢 Safe"
-    elif val <= 100:
-        return "Moderate", "🟡 Sensitive people be cautious"
-    elif val <= 150:
-        return "Unhealthy (Sensitive)", "🟠 Avoid long exposure"
-    elif val <= 200:
-        return "Unhealthy", "🔴 Stay indoors"
-    elif val <= 300:
-        return "Very Unhealthy", "🟣 Health warning"
-    else:
-        return "Hazardous", "⚫ Emergency"
+        live_df = pd.DataFrame([live_input])
+        prediction = model.predict(live_df)[0]
 
-label, alert = aqi_label(prediction)
+        # -------------------------------
+        # AQI LABEL + ALERT
+        # -------------------------------
+        def aqi_label(val):
+            if val <= 50:
+                return "Good", "🟢 Safe"
+            elif val <= 100:
+                return "Moderate", "🟡 Sensitive people be cautious"
+            elif val <= 150:
+                return "Unhealthy (Sensitive)", "🟠 Avoid long exposure"
+            elif val <= 200:
+                return "Unhealthy", "🔴 Stay indoors"
+            elif val <= 300:
+                return "Very Unhealthy", "🟣 Health warning"
+            else:
+                return "Hazardous", "⚫ Emergency"
 
-st.subheader("🔮 AQI Prediction for Selected Location")
-st.metric("Predicted AQI", f"{prediction:.2f}")
-st.warning(f"{label} — {alert}")
+        label, alert = aqi_label(prediction)
 
-health_tips = {
-    "Good": "Enjoy outdoor activities 🌿",
-    "Moderate": "Limit outdoor exertion",
-    "Unhealthy (Sensitive)": "Children & elderly should stay indoors",
-    "Unhealthy": "Avoid outdoor activity",
-    "Very Unhealthy": "Wear masks and use air purifiers",
-    "Hazardous": "Emergency conditions"
-}
+        st.subheader("🔮 AQI Prediction for Selected Location")
+        st.metric("Predicted AQI", f"{prediction:.2f}")
+        st.warning(f"{label} — {alert}")
 
-st.error(f"🚨 Health Advisory: {health_tips[label]}")
+        health_tips = {
+            "Good": "Enjoy outdoor activities 🌿",
+            "Moderate": "Limit outdoor exertion",
+            "Unhealthy (Sensitive)": "Children & elderly should stay indoors",
+            "Unhealthy": "Avoid outdoor activity",
+            "Very Unhealthy": "Wear masks and use air purifiers",
+            "Hazardous": "Emergency conditions"
+        }
+        st.error(f"🚨 Health Advisory: {health_tips[label]}")
 
-# -------------------------------
-# COLOR FUNCTION FOR MAP
-# -------------------------------
-def aqi_color(aqi):
-    if aqi <= 50:
-        return [0, 255, 0]
-    elif aqi <= 100:
-        return [255, 255, 0]
-    elif aqi <= 150:
-        return [255, 165, 0]
-    elif aqi <= 200:
-        return [255, 0, 0]
-    else:
-        return [128, 0, 128]
+        # -------------------------------
+        # COLOR FUNCTION
+        # -------------------------------
+        def aqi_color(aqi):
+            if aqi <= 50:
+                return [0, 255, 0]
+            elif aqi <= 100:
+                return [255, 255, 0]
+            elif aqi <= 150:
+                return [255, 165, 0]
+            elif aqi <= 200:
+                return [255, 0, 0]
+            else:
+                return [128, 0, 128]
 
-# -------------------------------
-# SHOW MAP WITH CLICKED LOCATION
-# -------------------------------
-st.subheader("🗺️ Pollution Map for Selected Location")
-map_df = pd.DataFrame({
-    "lat": [clicked_lat],
-    "lon": [clicked_lon],
-    "AQI": [prediction]
-})
-st.map(map_df, color=aqi_color(prediction), size=80)
+        # -------------------------------
+        # SHOW MAP WITH MARKER
+        # -------------------------------
+        m2 = folium.Map(location=[clicked_lat, clicked_lon], zoom_start=10)
+        folium.CircleMarker(
+            location=[clicked_lat, clicked_lon],
+            radius=15,
+            color='black',
+            fill=True,
+            fill_color=f"#{''.join([format(c,'02x') for c in aqi_color(prediction)])}",
+            fill_opacity=0.8,
+            popup=f"AQI: {prediction:.2f} — {label}"
+        ).add_to(m2)
 
-# -------------------------------
-# MODEL PERFORMANCE
-# -------------------------------
-y_pred = model.predict(X_test)
-st.subheader("📊 Model Performance")
-st.metric("MAE", f"{mean_absolute_error(y_test, y_pred):.2f}")
-st.metric("R² Score", f"{r2_score(y_test, y_pred):.2f}")
-
-# -------------------------------
-# SHAP
-# -------------------------------
-st.subheader("🧠 Feature Importance (SHAP)")
-explainer = shap.Explainer(model)
-shap_values = explainer(X_test)
-
-fig, ax = plt.subplots()
-shap.summary_plot(shap_values, X_test, show=False)
-st.pyplot(fig)
-
-# -------------------------------
-# FUTURE SCOPE
-# -------------------------------
-with st.expander("🚀 Future Scope"):
-    st.markdown("""
-    - IoT-based street sensors  
-    - Government dashboards  
-    - Mobile alert notifications  
-    - 24-hour AQI forecasting  
-    """)
-
-# -------------------------------
-# IMPACT
-# -------------------------------
-st.success(
-    "Impact: Enables real-time, location-aware air quality decisions "
-    "for citizens and authorities."
-)
-
+        st.subheader("🗺️ Pollution Marker for Selected Location")
+        st_folium(m2, width=700, height=500)
