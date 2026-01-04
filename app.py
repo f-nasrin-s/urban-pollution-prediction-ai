@@ -18,8 +18,8 @@ st.dataframe(df.head())
 # Make sure to replace print() with st.write() or st.pyplot()
 # Example template:
 if "AQI" in df.columns:
-    X = df.drop(columns=["AQI"])
-    y = df["AQI"]
+    X = df.drop(columns=["aqi"])
+    y = df["aqi"]
 
     # Encode categorical columns
     for col in X.select_dtypes(include='object').columns:
