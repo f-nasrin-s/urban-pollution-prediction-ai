@@ -1,11 +1,19 @@
 # 🏙️ Smart City Pollution AI
 
+[![Streamlit App](https://static.streamlit.io/badges/streamlit_badge_black_white.svg)](https://urban-pollution-prediction-6dmakpymvkefnjijeeyetm.streamlit.app/)
 ![Python](https://img.shields.io/badge/Python-3.12-blue?logo=python)
 ![Streamlit](https://img.shields.io/badge/Streamlit-1.25-orange?logo=streamlit)
 ![XGBoost](https://img.shields.io/badge/XGBoost-1.7-red)
 
 **Real-time Urban Pollution Monitoring & Prediction Platform**  
 Monitor AQI, analyze pollution sources, simulate interventions, and get AI recommendations for health and policy.
+
+---
+
+## 🚀 Live Demo
+
+🎯 Try the app online:  
+👉 [Smart City Pollution AI](https://urban-pollution-prediction-6dmakpymvkefnjijeeyetm.streamlit.app/)
 
 ---
 
@@ -37,6 +45,8 @@ Monitor AQI, analyze pollution sources, simulate interventions, and get AI recom
 | aqi_cat | AQI Category (Good/Moderate/Unhealthy) |
 | ... | Other features (Season, Day/Night, Sequence, Image) |
 
+The ML model uses PM2.5, PM10, and other relevant features to predict AQI.
+
 ---
 
 ## 💻 Installation
@@ -44,7 +54,7 @@ Monitor AQI, analyze pollution sources, simulate interventions, and get AI recom
 1. Clone the repo:
 
 ```bash
-git clone https://github.com/f-nasrin-s/smart-city-pollution-ai.git
+git clone https://github.com/your-username/smart-city-pollution-ai.git
 cd smart-city-pollution-ai
 Install dependencies:
 
@@ -57,7 +67,7 @@ toml
 Copy code
 # .streamlit/secrets.toml
 OPENWEATHER_API_KEY = "83350e70e4de15a991533bdd03e028ab"
-🚀 Run the App
+🚀 Run the App Locally
 bash
 Copy code
 streamlit run app.py
@@ -86,4 +96,3 @@ Mobile-friendly citizen alerts
 Advanced NLP chatbot for natural language queries
 
 Meteorological impact integration for better AQI predictions
-
