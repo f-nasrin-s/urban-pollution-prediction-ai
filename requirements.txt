@@ -8,3 +8,4 @@ pytz
 geopy
 folium
 streamlit-folium
+matplotlib
