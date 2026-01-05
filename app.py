@@ -191,4 +191,4 @@ if user_q:
         response = "Health risk: " + ", ".join([f"{k}: {v}" for k,v in health_risk.items()])
     else:
         response = "This is a Smart City Pollution AI. Ask about AQI, PM2.5, PM10, or health risks."
-    st.info(response)     this is my final app.p code for hackathon so is it ok to win or more advance is needed
+    st.info(response)     
