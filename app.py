@@ -1,8 +1,6 @@
 # ============================================================
 # SMART CITY AI – URBAN POLLUTION COMMAND CENTER
-# Domain: Smart Cities & Urban Intelligence
-# Ultimate Hackathon Version 🏆
-# Features: Auto-detect, Map click, What-If Simulation, AI Recommendations, Health Score, Chatbot
+# Hackathon Winning Version 🏆
 # ============================================================
 
 import streamlit as st
@@ -11,55 +9,36 @@ import numpy as np
 import requests
 import folium
 import pytz
-
 from datetime import datetime
 from streamlit_folium import st_folium
 from folium.plugins import HeatMap
-
 from xgboost import XGBRegressor
 from sklearn.preprocessing import LabelEncoder
-from sklearn.model_selection import train_test_split
+from sklearn.feature_extraction.text import TfidfVectorizer
+from sklearn.metrics.pairwise import cosine_similarity
+import joblib
 
 # ------------------ PAGE CONFIG ------------------
 st.set_page_config(page_title="Smart City Pollution AI", layout="wide")
 st.title("🏙️ Smart City Pollution AI – Command Center")
-st.caption("AI Prediction • Factor Attribution • Health Risk • Policy Simulation • Interactive Chatbot")
+st.caption("AI Prediction • Factor Attribution • Health Risk • Policy Simulation • Semantic Chatbot")
 
 ist = pytz.timezone("Asia/Kolkata")
 st.caption(f"⏱️ System Time: {datetime.now(ist).strftime('%d %b %Y | %H:%M:%S IST')}")
 
-# ------------------ MODEL TRAINING ------------------
+# ------------------ LOAD PRE-TRAINED MODEL ------------------
 @st.cache_resource
-def train_model():
-    df = pd.read_csv("TRAQID.csv")
-    aqi_col = [c for c in df.columns if "aqi" in c.lower()][0]
-    drop_cols = ["Image", "created_at", "Sequence", "aqi_cat", aqi_col]
+def load_model():
+    try:
+        model = joblib.load("aqi_model.pkl")
+        encoders = joblib.load("label_encoders.pkl")
+        features = joblib.load("feature_cols.pkl")
+        return model, encoders, features
+    except:
+        st.warning("Pre-trained model not found. Please train model first.")
+        st.stop()
 
-    X = df.drop(columns=[c for c in drop_cols if c in df.columns])
-    y = df[aqi_col]
-
-    encoders = {}
-    for col in X.select_dtypes(include="object").columns:
-        le = LabelEncoder()
-        X[col] = le.fit_transform(X[col])
-        encoders[col] = le
-
-    X_train, _, y_train, _ = train_test_split(
-        X, y, test_size=0.2, random_state=42
-    )
-
-    model = XGBRegressor(
-        n_estimators=80,
-        max_depth=5,
-        learning_rate=0.1,
-        subsample=0.85,
-        colsample_bytree=0.85,
-        random_state=42
-    )
-    model.fit(X_train, y_train)
-    return model, encoders, X.columns.tolist()
-
-model, encoders, features = train_model()
+model, encoders, features = load_model()
 
 # ------------------ LOCATION SELECTION ------------------
 st.subheader("📍 Location Selection")
@@ -111,19 +90,29 @@ c1, c2 = st.columns(2)
 c1.metric("PM2.5 (µg/m³)", pm25)
 c2.metric("PM10 (µg/m³)", pm10)
 
-# ------------------ AQI PREDICTION ------------------
+# ------------------ ML PREDICTION WITH DERIVED FEATURES ------------------
 row = {}
 for col in features:
     if col.lower() == "pm2.5":
         row[col] = pm25
     elif col.lower() == "pm10":
         row[col] = pm10
+    elif col.lower() == "pm_ratio":
+        row[col] = pm25 / (pm10 + 1e-5)
+    elif col.lower() == "hour_sin":
+        hour = datetime.now().hour
+        row[col] = np.sin(2*np.pi*hour/24)
+    elif col.lower() == "hour_cos":
+        hour = datetime.now().hour
+        row[col] = np.cos(2*np.pi*hour/24)
+    elif col in encoders:
+        row[col] = encoders[col].transform([encoders[col].classes_[0]])[0]
     else:
         row[col] = 0
 
 predicted_aqi = float(model.predict(pd.DataFrame([row]))[0])
 
-# ------------------ ADVANCED ANALYTICS ------------------
+# ------------------ HEALTH & RISK ------------------
 risk_score = min(100, round(predicted_aqi / 3))
 source = "🚗 Traffic & Combustion" if pm25 > 1.3*pm10 else ("🏗️ Dust / Construction" if pm10>1.3*pm25 else "🏭 Mixed Emissions")
 health_risk = {"Children": "High" if predicted_aqi>120 else "Moderate",
@@ -150,45 +139,60 @@ construction = st.slider("🏗️ Construction Reduction (%)", 0, 50, 0)
 
 sim_pm25 = pm25*(1-traffic/200)
 sim_pm10 = pm10*(1-construction/200)
-
 sim_row = row.copy()
 sim_row[next(k for k in row if k.lower()=="pm2.5")] = sim_pm25
 sim_row[next(k for k in row if k.lower()=="pm10")] = sim_pm10
-
+sim_row["PM_Ratio"] = sim_pm25 / (sim_pm10 + 1e-5)
 sim_aqi = model.predict(pd.DataFrame([sim_row]))[0]
 st.metric("Simulated AQI", round(sim_aqi,2))
 
 # ------------------ HOTSPOT MAP ------------------
 st.subheader("🗺️ Pollution Hotspot Map")
 m2 = folium.Map(location=[lat, lon], zoom_start=12)
-folium.CircleMarker([lat, lon], radius=20, fill=True, fill_color="red", fill_opacity=0.85,
+color = "#00FF00" if predicted_aqi<=50 else "#FFFF00" if predicted_aqi<=100 else "#FFA500" if predicted_aqi<=150 else "#FF0000" if predicted_aqi<=200 else "#800080"
+folium.CircleMarker([lat, lon], radius=20, fill=True, fill_color=color, fill_opacity=0.85,
                     popup=f"AQI: {round(predicted_aqi,2)}").add_to(m2)
 HeatMap([[lat, lon, predicted_aqi]], radius=35).add_to(m2)
 st_folium(m2, height=420)
 
-# ------------------ AI RECOMMENDATION ENGINE ------------------
+# ------------------ DYNAMIC AI RECOMMENDATIONS ------------------
 st.subheader("🤖 AI Recommended Actions")
-if predicted_aqi > 180:
+if sim_aqi > 180:
     st.error("🚨 SEVERE POLLUTION ALERT\n• Emergency advisory\n• Odd-even traffic\n• Stop construction\n• Deploy mobile purifiers")
-elif predicted_aqi > 120:
-    st.warning("⚠️ MODERATE-HIGH POLLUTION\n• Remote work advisory\n• Traffic congestion control\n• Monitor hotspots")
+elif sim_aqi > 120:
+    st.warning("⚠️ MODERATE-HIGH POLLUTION\n• Limit outdoor activity\n• Control traffic\n• Monitor hotspots")
 else:
-    st.success("✅ LOW POLLUTION ZONE\n• Normal activities\n• Promote green mobility")
+    st.success("✅ LOW POLLUTION ZONE\n• Normal activities allowed\n• Promote green mobility")
 
-# ------------------ INTERACTIVE CHATBOT ------------------
-st.subheader("💬 Ask the Pollution AI")
+# ------------------ SEMANTIC CHATBOT ------------------
+st.subheader("💬 Ask the Smart City AI")
 user_q = st.text_input("Type your question here:")
+
+# ------------------ FAQ KNOWLEDGE BASE ------------------
+faq_data = [
+    {"q":"What is AQI?","a":"AQI (Air Quality Index) measures overall air pollution."},
+    {"q":"What is PM2.5?","a":"Fine particulate matter smaller than 2.5 microns, harmful to lungs."},
+    {"q":"What is PM10?","a":"Coarse particulate matter smaller than 10 microns, affects respiratory system."},
+    {"q":"Is outdoor activity safe?","a":f"Predicted AQI at this location is {round(predicted_aqi,2)}. Health risk for children, elderly, asthma patients is {', '.join([f'{k}: {v}' for k,v in health_risk.items()])}."},
+    {"q":"What health risks exist?","a":"High AQI affects children, elderly, and asthma patients. Stay indoors in severe conditions."},
+    {"q":"How can pollution be reduced?","a":"Reduce traffic, limit construction, plant trees, use air purifiers."},
+    {"q":"Which pollutant is dominant?","a":'PM2.5' if pm25>pm10 else 'PM10'},
+    {"q":"Emergency measures?","a":"Deploy air purifiers, reduce traffic, stop construction, avoid outdoor activity in high pollution."}
+]
+
+# TF-IDF Vectorizer
+vectorizer = TfidfVectorizer()
+faq_questions = [item["q"] for item in faq_data]
+faq_vectors = vectorizer.fit_transform(faq_questions)
+
+def semantic_answer(user_input):
+    user_vec = vectorizer.transform([user_input])
+    sim_scores = cosine_similarity(user_vec, faq_vectors)[0]
+    best_idx = sim_scores.argmax()
+    if sim_scores[best_idx] < 0.2:
+        return "🤖 Sorry, I am not sure. Ask about AQI, PM2.5, PM10, or health risks."
+    return faq_data[best_idx]["a"]
+
 if user_q:
-    user_q_lower = user_q.lower()
-    response = ""
-    if "pm2.5" in user_q_lower:
-        response = f"Current PM2.5 is {pm25:.2f} µg/m³."
-    elif "pm10" in user_q_lower:
-        response = f"Current PM10 is {pm10:.2f} µg/m³."
-    elif "aqi" in user_q_lower:
-        response = f"Predicted AQI at this location is {predicted_aqi:.2f}."
-    elif "health" in user_q_lower or "risk" in user_q_lower:
-        response = "Health risk: " + ", ".join([f"{k}: {v}" for k,v in health_risk.items()])
-    else:
-        response = "This is a Smart City Pollution AI. Ask about AQI, PM2.5, PM10, or health risks."
-    st.info(response)
+    ans = semantic_answer(user_q)
+    st.info(ans)
