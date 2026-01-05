@@ -5,7 +5,5 @@ xgboost
 scikit-learn
 requests
 pytz
-geopy
 folium
 streamlit-folium
-matplotlib
