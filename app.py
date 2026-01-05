@@ -1,8 +1,8 @@
-# ======================================================
-# Urban Pollution Prediction with Factor Attribution
+# ==========================================================
+# AI-Driven Smart Urban Pollution Intelligence System
 # Domain: Smart Cities & Urban Intelligence
-# Hackathon Winning Version 🚀
-# ======================================================
+# Hackathon Advanced Edition 🏆
+# ==========================================================
 
 import streamlit as st
 import pandas as pd
@@ -10,221 +10,206 @@ import numpy as np
 import requests
 import folium
 import pytz
-import matplotlib.pyplot as plt
 
 from datetime import datetime
-from geopy.geocoders import Nominatim
 from streamlit_folium import st_folium
 from folium.plugins import HeatMap
 
 from xgboost import XGBRegressor
-from sklearn.model_selection import train_test_split
 from sklearn.preprocessing import LabelEncoder
+from sklearn.model_selection import train_test_split
 
-# -------------------------------
+# ------------------------------
 # PAGE CONFIG
-# -------------------------------
-st.set_page_config(
-    page_title="Smart Urban Pollution Prediction",
-    layout="wide"
-)
+# ------------------------------
+st.set_page_config(page_title="Urban Pollution Intelligence", layout="wide")
 
-st.title("🌍 Urban Pollution Prediction with Factor Attribution")
-st.caption("Domain: Smart Cities & Urban Intelligence")
+st.title("🌆 Smart Urban Pollution Intelligence System")
+st.caption("AI-powered AQI Prediction • Risk Analysis • Factor Attribution")
 
 ist = pytz.timezone("Asia/Kolkata")
-st.caption(f"⏱️ Updated: {datetime.now(ist).strftime('%d %b %Y | %H:%M:%S IST')}")
+st.caption(f"⏱️ Live System Time: {datetime.now(ist).strftime('%d %b %Y | %H:%M:%S IST')}")
 
-# -------------------------------
-# PROBLEM & IMPACT
-# -------------------------------
-with st.expander("📌 Problem Statement & Urban Impact"):
-    st.write("""
-    Urban air pollution severely impacts public health and city sustainability.
-
-    This system:
-    - Predicts AQI for **user’s current location** or **any selected urban area**
-    - Uses **Machine Learning + Live Pollution Data**
-    - Provides **Factor Attribution** (PM2.5, PM10)
-    - Helps citizens & smart-city authorities take preventive action
-    """)
-
-# -------------------------------
-# LOAD & TRAIN MODEL (CACHED)
-# -------------------------------
+# ------------------------------
+# FAST MODEL LOAD (CACHED)
+# ------------------------------
 @st.cache_resource
-def load_model():
+def train_model():
     df = pd.read_csv("TRAQID.csv")
 
-    # Detect AQI column
     aqi_col = [c for c in df.columns if "aqi" in c.lower()][0]
-
     drop_cols = ["Image", "created_at", "Sequence", "aqi_cat", aqi_col]
+
     X = df.drop(columns=[c for c in drop_cols if c in df.columns])
     y = df[aqi_col]
 
-    label_encoders = {}
+    encoders = {}
     for col in X.select_dtypes(include="object").columns:
         le = LabelEncoder()
         X[col] = le.fit_transform(X[col])
-        label_encoders[col] = le
+        encoders[col] = le
 
-    X_train, _, y_train, _ = train_test_split(
-        X, y, test_size=0.2, random_state=42
-    )
+    X_train, _, y_train, _ = train_test_split(X, y, test_size=0.2, random_state=42)
 
-    # ⚡ Lightweight but strong model (fast for hackathon)
     model = XGBRegressor(
         n_estimators=80,
-        max_depth=4,
+        max_depth=5,
         learning_rate=0.1,
         subsample=0.8,
+        colsample_bytree=0.8,
         random_state=42
     )
-
     model.fit(X_train, y_train)
 
-    return model, label_encoders, X.columns.tolist()
+    return model, encoders, X.columns.tolist()
 
-model, label_encoders, feature_cols = load_model()
+model, encoders, features = train_model()
 
-# -------------------------------
-# LOCATION SELECTION
-# -------------------------------
-st.subheader("🗺️ Select Location for AQI Prediction")
+# ------------------------------
+# LOCATION MODE
+# ------------------------------
+st.subheader("📍 Location Intelligence")
 
-base_map = folium.Map(location=[20.5937, 78.9629], zoom_start=5)
-map_data = st_folium(base_map, width=700, height=450)
+mode = st.radio(
+    "Select prediction mode:",
+    ["📌 Auto Detect My Location", "🗺️ Predict Anywhere on Map"]
+)
 
-# -------------------------------
-# PROCESS LOCATION
-# -------------------------------
-if map_data and map_data.get("last_clicked"):
+def auto_location():
+    try:
+        res = requests.get("https://ipapi.co/json/").json()
+        return float(res["latitude"]), float(res["longitude"])
+    except:
+        return None, None
+
+if mode == "📌 Auto Detect My Location":
+    lat, lon = auto_location()
+    if lat is None:
+        st.error("Location detection failed")
+        st.stop()
+    st.success(f"Detected → {lat:.4f}, {lon:.4f}")
+else:
+    base_map = folium.Map(location=[20.5937, 78.9629], zoom_start=5)
+    map_data = st_folium(base_map, height=450)
+    if not map_data or not map_data.get("last_clicked"):
+        st.info("Click on the map to select a location")
+        st.stop()
     lat = float(map_data["last_clicked"]["lat"])
     lon = float(map_data["last_clicked"]["lng"])
+    st.success(f"Selected → {lat:.4f}, {lon:.4f}")
 
-    st.success(f"📍 Selected Location: {lat:.4f}, {lon:.4f}")
+# ------------------------------
+# LIVE POLLUTION DATA
+# ------------------------------
+API_KEY = st.secrets.get("OPENWEATHER_API_KEY", "")
+if not API_KEY:
+    st.error("OpenWeather API key missing")
+    st.stop()
 
-    # Reverse Geocoding
-    geolocator = Nominatim(user_agent="urban_aqi_app")
-    place = geolocator.reverse((lat, lon), language="en")
+url = f"https://api.openweathermap.org/data/2.5/air_pollution?lat={lat}&lon={lon}&appid={API_KEY}"
+pollution = requests.get(url).json()
+comp = pollution["list"][0]["components"]
 
-    city = (
-        place.raw["address"].get("city")
-        or place.raw["address"].get("town")
-        or place.raw["address"].get("state")
-        or "Unknown"
-    )
+pm25 = float(comp["pm2_5"])
+pm10 = float(comp["pm10"])
 
-    st.info(f"🏙️ Detected Area: {city}")
+c1, c2 = st.columns(2)
+c1.metric("PM2.5", pm25)
+c2.metric("PM10", pm10)
 
-    # -------------------------------
-    # LIVE AQI FROM API
-    # -------------------------------
-    API_KEY = st.secrets.get("OPENWEATHER_API_KEY", "")
+# ------------------------------
+# ML PREDICTION
+# ------------------------------
+input_row = {}
+for col in features:
+    if col.lower() == "pm2.5":
+        input_row[col] = pm25
+    elif col.lower() == "pm10":
+        input_row[col] = pm10
+    else:
+        input_row[col] = 0
 
-    if not API_KEY:
-        st.error("❌ OpenWeather API key not found")
-        st.stop()
+predicted_aqi = float(model.predict(pd.DataFrame([input_row]))[0])
 
-    url = f"https://api.openweathermap.org/data/2.5/air_pollution?lat={lat}&lon={lon}&appid={API_KEY}"
-    res = requests.get(url).json()
+# ------------------------------
+# ADVANCED AQI ANALYSIS
+# ------------------------------
+risk_score = min(100, round(predicted_aqi / 3))
 
-    components = res["list"][0]["components"]
-    pm25 = float(components["pm2_5"])
-    pm10 = float(components["pm10"])
+if pm25 > pm10 and pm25 > 60:
+    source = "🚗 Traffic & Combustion Sources"
+elif pm10 > pm25 and pm10 > 80:
+    source = "🏗️ Dust & Construction Activity"
+else:
+    source = "🏭 Mixed Urban Emissions"
 
-    c1, c2 = st.columns(2)
-    c1.metric("PM2.5 (µg/m³)", pm25)
-    c2.metric("PM10 (µg/m³)", pm10)
+# ------------------------------
+# HEALTH IMPACT INDEX
+# ------------------------------
+health_impact = {
+    "Children": "High" if predicted_aqi > 120 else "Moderate",
+    "Elderly": "High" if predicted_aqi > 100 else "Moderate",
+    "Asthma Patients": "Severe" if predicted_aqi > 90 else "Moderate"
+}
 
-    # -------------------------------
-    # ML PREDICTION
-    # -------------------------------
-    live_input = {}
+# ------------------------------
+# DISPLAY RESULTS
+# ------------------------------
+st.subheader("🔮 AI AQI Prediction")
+st.metric("Predicted AQI", f"{predicted_aqi:.2f}")
+st.metric("Urban Risk Score", f"{risk_score} / 100")
 
-    for col in feature_cols:
-        if col.lower() == "pm2.5":
-            live_input[col] = pm25
-        elif col.lower() == "pm10":
-            live_input[col] = pm10
-        elif col in label_encoders:
-            live_input[col] = label_encoders[col].transform(
-                [label_encoders[col].classes_[0]]
-            )[0]
-        else:
-            live_input[col] = 0
+st.subheader("🧪 Pollution Intelligence")
+st.write(f"**Likely Pollution Source:** {source}")
+st.write(f"**Dominant Factor:** {'PM2.5' if pm25 > pm10 else 'PM10'}")
 
-    live_df = pd.DataFrame([live_input])[feature_cols]
-    prediction = float(model.predict(live_df)[0])
+st.subheader("❤️ Health Impact Index")
+for k, v in health_impact.items():
+    st.write(f"- **{k}** → {v} risk")
 
-    # -------------------------------
-    # AQI CATEGORY
-    # -------------------------------
-    def aqi_label(val):
-        if val <= 50:
-            return "Good 🟢", "Safe for all activities"
-        elif val <= 100:
-            return "Moderate 🟡", "Sensitive people should be cautious"
-        elif val <= 150:
-            return "Unhealthy (Sensitive) 🟠", "Limit prolonged outdoor exposure"
-        elif val <= 200:
-            return "Unhealthy 🔴", "Avoid outdoor activities"
-        elif val <= 300:
-            return "Very Unhealthy 🟣", "Health warnings issued"
-        else:
-            return "Hazardous ⚫", "Emergency conditions"
+# ------------------------------
+# VISUAL HOTSPOT MAP
+# ------------------------------
+st.subheader("🗺️ Urban Pollution Hotspot")
 
-    label, advisory = aqi_label(prediction)
+m2 = folium.Map(location=[lat, lon], zoom_start=12)
 
-    st.subheader("🔮 Predicted AQI")
-    st.metric("AQI Value", f"{prediction:.2f}")
-    st.warning(f"{label} — {advisory}")
+folium.CircleMarker(
+    [lat, lon],
+    radius=20,
+    fill=True,
+    fill_color="red",
+    fill_opacity=0.85,
+    popup=f"AQI: {round(predicted_aqi,2)}"
+).add_to(m2)
 
-    # -------------------------------
-    # FACTOR ATTRIBUTION (KEY PART)
-    # -------------------------------
-    st.subheader("🧪 Pollution Factor Attribution")
+HeatMap([[lat, lon, predicted_aqi]], radius=35).add_to(m2)
 
-    st.write(f"""
-    **Dominant contributing factors at this location:**
-    - 🌫️ **PM2.5 concentration:** {pm25} µg/m³  
-    - 🏭 **PM10 concentration:** {pm10} µg/m³  
+st_folium(m2, height=450)
 
-    These particulate matter pollutants are the **primary drivers of AQI**
-    in dense urban environments.
+# ------------------------------
+# SMART CITY DECISION ENGINE
+# ------------------------------
+st.subheader("🏙️ Smart City Decision Support")
+
+if predicted_aqi > 150:
+    st.error("""
+    🚨 **Critical Pollution Zone Detected**
+    - Trigger public health alert
+    - Restrict heavy vehicle movement
+    - Activate air purification zones
+    """)
+elif predicted_aqi > 100:
+    st.warning("""
+    ⚠️ **Moderate Risk Zone**
+    - Monitor traffic congestion
+    - Advise remote work policies
+    - Increase green cover monitoring
+    """)
+else:
+    st.success("""
+    ✅ **Low Risk Zone**
+    - Normal activities permitted
+    - Encourage outdoor mobility
     """)
 
-    # -------------------------------
-    # AQI VISUALIZATION
-    # -------------------------------
-    st.subheader("🗺️ Urban AQI Visualization")
-
-    m2 = folium.Map(location=[lat, lon], zoom_start=10)
-
-    folium.CircleMarker(
-        location=[lat, lon],
-        radius=15,
-        color="black",
-        fill=True,
-        fill_color="red",
-        fill_opacity=0.8,
-        popup=f"AQI: {round(prediction, 2)}"
-    ).add_to(m2)
-
-    HeatMap([[lat, lon, prediction]], radius=25).add_to(m2)
-
-    st_folium(m2, width=700, height=450)
-
-    # -------------------------------
-    # SMART CITY INSIGHT
-    # -------------------------------
-    st.subheader("🏙️ Smart City Insight")
-
-    st.info("""
-    This location can be classified as a **pollution hotspot**.
-    Authorities can use this information for:
-    - Traffic regulation
-    - Green zone planning
-    - Public health alerts
-    """)
