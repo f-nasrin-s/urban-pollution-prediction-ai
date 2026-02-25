@@ -1,11 +1,11 @@
 streamlit
 pandas
 numpy
-xgboost
-scikit-learn
 requests
 folium
 streamlit-folium
+xgboost
+scikit-learn
 pytz
-joblib
-matplotlib
+google-generativeai
+plotly
