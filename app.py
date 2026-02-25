@@ -248,4 +248,4 @@ if q:
     elif "health" in q or "risk" in q:
         st.info(", ".join([f"{k}: {v}" for k,v in health.items()]))
     else:
-        st.info("Try asking about AQI, PM2.5, PM10 or health risks.")      this is the code currently is.....but to win in hackathon make advanced one and guid estep by step
+        st.info("Try asking about AQI, PM2.5, PM10 or health risks.")      
