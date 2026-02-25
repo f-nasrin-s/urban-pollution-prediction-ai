@@ -6,6 +6,6 @@ folium
 streamlit-folium
 xgboost
 scikit-learn
+tensorflow
+matplotlib
 pytz
-google-generativeai
-plotly
