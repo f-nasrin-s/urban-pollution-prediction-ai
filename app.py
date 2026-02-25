@@ -34,8 +34,8 @@ st.title("🌍 UrbanGuard AI – National Smart City Pollution Intelligence Syst
 # API KEYS
 # ============================================================
 
-OPENWEATHER = st.secrets["83350e70e4de15a991533bdd03e028ab"]
-GEMINI = st.secrets["AIzaSyC07SeyE7T6oTxP4PKk_k8WVBj4ATE_bGg"]
+OPENWEATHER = st.secrets["OPENWEATHER_API_KEY"]
+GEMINI = st.secrets["GEMINI_API_KEY"]
 
 genai.configure(api_key=GEMINI)
 
