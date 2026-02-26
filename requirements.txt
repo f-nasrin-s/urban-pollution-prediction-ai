@@ -1,10 +1,8 @@
 streamlit
+requests
 pandas
 numpy
-folium
-streamlit-folium
-requests
-pytz
-scikit-learn
-xgboost
+matplotlib
 plotly
+scikit-learn
+geopy
