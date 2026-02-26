@@ -4,6 +4,7 @@ numpy
 requests
 folium
 streamlit-folium
-pytz
-xgboost
 scikit-learn
+xgboost
+tensorflow
+pytz
