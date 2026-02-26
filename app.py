@@ -1,4 +1,4 @@
-this is app.py # ============================================================
+============================================================
 # SMART CITY AI – URBAN POLLUTION COMMAND CENTER
 # Domain: Smart Cities & Urban Intelligence
 # ============================================================
@@ -248,4 +248,4 @@ if q:
     elif "health" in q or "risk" in q:
         st.info(", ".join([f"{k}: {v}" for k,v in health.items()]))
     else:
-        st.info("Try asking about AQI, PM2.5, PM10 or health risks.")          make it more advanced to win in nationl level hackathon
+        st.info("Try asking about AQI, PM2.5, PM10 or health risks.")          
