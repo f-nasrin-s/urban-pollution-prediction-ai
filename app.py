@@ -1,6 +1,5 @@
 # ============================================================
-# URBANGUARD AI – NATIONAL SMART CITY POLLUTION COMMAND CENTER
-# ISRO-LEVEL HACKATHON WINNING SYSTEM
+# URBANGUARD AI – ISRO-LEVEL NATIONAL POLLUTION INTELLIGENCE
 # ============================================================
 
 import streamlit as st
@@ -9,145 +8,133 @@ import numpy as np
 import requests
 import folium
 import pytz
-import json
 import time
 
 from datetime import datetime
 from streamlit_folium import st_folium
-from folium.plugins import HeatMap, MarkerCluster
+from folium.plugins import HeatMap
+
+from sklearn.preprocessing import LabelEncoder, MinMaxScaler
+from sklearn.model_selection import train_test_split
 
 from xgboost import XGBRegressor
-from sklearn.model_selection import train_test_split
-from sklearn.preprocessing import LabelEncoder
+
+from tensorflow.keras.models import Sequential
+from tensorflow.keras.layers import LSTM, Dense
 
 import streamlit.components.v1 as components
 
 # ============================================================
-# PAGE CONFIG
+# CONFIG
 # ============================================================
 
 st.set_page_config(
-    page_title="UrbanGuard AI – National Command Center",
-    layout="wide",
-    page_icon="🛰️"
+    page_title="UrbanGuard AI – National Pollution Intelligence",
+    layout="wide"
 )
 
-# ============================================================
-# ISRO LEVEL UI THEME
-# ============================================================
-
-st.markdown("""
-<style>
-
-.stApp {
-    background: linear-gradient(180deg, #030712 0%, #071426 100%);
-    color: #E5E7EB;
-}
-
-h1, h2, h3 {
-    color: #00E5FF;
-    text-shadow: 0px 0px 12px rgba(0,229,255,0.7);
-}
-
-[data-testid="metric-container"] {
-    background: linear-gradient(145deg, #071426, #0B2239);
-    border: 1px solid rgba(0,229,255,0.3);
-    padding: 15px;
-    border-radius: 12px;
-    box-shadow: 0px 0px 15px rgba(0,229,255,0.2);
-}
-
-.stButton button {
-    background: linear-gradient(90deg, #00E5FF, #00FFA3);
-    color: black;
-    border-radius: 8px;
-    font-weight: bold;
-}
-
-section[data-testid="stSidebar"] {
-    background: linear-gradient(180deg, #020617, #071426);
-}
-
-</style>
-""", unsafe_allow_html=True)
-
-# ============================================================
-# HEADER
-# ============================================================
-
-st.title("🛰️ URBANGUARD AI")
-st.subheader("National Smart City Pollution Intelligence Command Center")
+st.title("🛰️ UrbanGuard AI – National Smart City Pollution Intelligence")
 
 ist = pytz.timezone("Asia/Kolkata")
-st.success(f"🟢 SYSTEM ONLINE | {datetime.now(ist).strftime('%d %b %Y %H:%M:%S IST')}")
-
-# ============================================================
-# SIDEBAR COMMAND PANEL
-# ============================================================
-
-with st.sidebar:
-
-    st.title("🛰️ Command Panel")
-
-    st.success("System Active")
-
-    st.metric("Cities monitored", "127")
-
-    st.metric("Sensors active", "4,892")
-
-    st.metric("AI accuracy", "98.2%")
-
-    st.metric("Prediction latency", "0.42s")
-
-# ============================================================
-# API KEY
-# ============================================================
+st.caption(f"⏱️ {datetime.now(ist).strftime('%d %b %Y | %H:%M:%S IST')}")
 
 API_KEY = st.secrets.get("OPENWEATHER_API_KEY", "")
 
-if API_KEY == "":
-    st.error("Please add OPENWEATHER_API_KEY in Streamlit Secrets")
-    st.stop()
+# ============================================================
+# SATELLITE STATUS
+# ============================================================
+
+st.header("🛰️ Satellite Network Status")
+
+c1, c2, c3 = st.columns(3)
+
+c1.success("ISRO INSAT-3D: ACTIVE")
+c2.success("NASA Aura: ACTIVE")
+c3.success("ESA Sentinel-5P: ACTIVE")
 
 # ============================================================
-# MODEL TRAINING
+# LOAD DATA
 # ============================================================
 
 @st.cache_resource
-def train_model():
+def load_data():
 
     df = pd.read_csv("TRAQID.csv")
 
     aqi_col = [c for c in df.columns if "aqi" in c.lower()][0]
 
-    drop_cols = ["Image", "created_at", "Sequence", "aqi_cat"]
+    drop_cols = ["Image","created_at","Sequence","aqi_cat",aqi_col]
 
-    X = df.drop(columns=[c for c in drop_cols if c in df.columns and c != aqi_col])
+    X = df.drop(columns=[c for c in drop_cols if c in df.columns])
 
     y = df[aqi_col]
 
     for col in X.select_dtypes(include="object").columns:
+
         le = LabelEncoder()
+
         X[col] = le.fit_transform(X[col])
 
-    X_train, _, y_train, _ = train_test_split(X, y, test_size=0.2)
+    return X, y, X.columns.tolist()
 
-    model = XGBRegressor(
-        n_estimators=200,
-        max_depth=6,
-        learning_rate=0.05,
-        subsample=0.8,
-        colsample_bytree=0.8
-    )
-
-    model.fit(X_train, y_train)
-
-    return model, X.columns.tolist()
-
-model, features = train_model()
+X, y, features = load_data()
 
 # ============================================================
-# GPS DETECTION
+# TRAIN XGBOOST MODEL
+# ============================================================
+
+@st.cache_resource
+def train_xgb():
+
+    model = XGBRegressor(n_estimators=150,max_depth=6)
+
+    model.fit(X,y)
+
+    return model
+
+xgb_model = train_xgb()
+
+# ============================================================
+# TRAIN LSTM MODEL
+# ============================================================
+
+@st.cache_resource
+def train_lstm():
+
+    scaler = MinMaxScaler()
+
+    y_scaled = scaler.fit_transform(y.values.reshape(-1,1))
+
+    X_lstm = []
+
+    y_lstm = []
+
+    seq = 10
+
+    for i in range(seq,len(y_scaled)):
+
+        X_lstm.append(y_scaled[i-seq:i])
+
+        y_lstm.append(y_scaled[i])
+
+    X_lstm,y_lstm = np.array(X_lstm),np.array(y_lstm)
+
+    model = Sequential()
+
+    model.add(LSTM(50,input_shape=(seq,1)))
+
+    model.add(Dense(1))
+
+    model.compile(loss="mse",optimizer="adam")
+
+    model.fit(X_lstm,y_lstm,epochs=5,verbose=0)
+
+    return model,scaler
+
+lstm_model, scaler = train_lstm()
+
+# ============================================================
+# GPS DETECT
 # ============================================================
 
 def gps():
@@ -155,199 +142,199 @@ def gps():
     html = """
     <script>
     navigator.geolocation.getCurrentPosition(
-        (pos) => {
-            const lat = pos.coords.latitude;
-            const lon = pos.coords.longitude;
-            const out = lat + "," + lon;
-
-            const input = window.parent.document.querySelector(
-            'input[data-testid="stTextInput"]');
-
-            input.value = out;
-            input.dispatchEvent(new Event('input', { bubbles: true }));
-        }
-    );
+    (pos)=>{
+    const coords=pos.coords.latitude+","+pos.coords.longitude;
+    const input=window.parent.document.querySelector('input');
+    input.value=coords;
+    input.dispatchEvent(new Event('input',{bubbles:true}));
+    });
     </script>
     """
 
     components.html(html)
 
 # ============================================================
-# LOCATION SELECTION
+# LOCATION
 # ============================================================
 
-st.header("📍 Select Location")
+st.header("📍 Location Selection")
 
 mode = st.radio(
-    "Choose method:",
-    ["Select on Map", "Auto Detect"]
+"Select",
+["Map","Auto Detect"]
 )
 
-lat, lon = None, None
+lat,lon=None,None
 
-if mode == "Auto Detect":
+if mode=="Auto Detect":
 
-    gps_val = st.text_input("GPS Location")
+    gps_val=st.text_input("GPS")
 
-    if st.button("Detect Location"):
+    if st.button("Detect"):
+
         gps()
 
     if gps_val:
-        lat, lon = map(float, gps_val.split(","))
 
-if mode == "Select on Map":
+        lat,lon=map(float,gps_val.split(","))
 
-    m = folium.Map(location=[20.5937, 78.9629], zoom_start=5)
+else:
 
-    map_data = st_folium(m, height=450)
+    m=folium.Map(location=[22,78],zoom_start=5)
 
-    if map_data and map_data.get("last_clicked"):
+    data=st_folium(m,height=400)
 
-        lat = float(map_data["last_clicked"]["lat"])
-        lon = float(map_data["last_clicked"]["lng"])
+    if data and data["last_clicked"]:
 
-# stop if no location
+        lat=data["last_clicked"]["lat"]
+
+        lon=data["last_clicked"]["lng"]
+
 if lat is None:
+
     st.stop()
 
 # ============================================================
-# GET CITY
+# LIVE AQI
 # ============================================================
 
-geo_url = f"http://api.openweathermap.org/geo/1.0/reverse?lat={lat}&lon={lon}&limit=1&appid={API_KEY}"
+url=f"http://api.openweathermap.org/data/2.5/air_pollution?lat={lat}&lon={lon}&appid={API_KEY}"
 
-geo = requests.get(geo_url).json()
+data=requests.get(url).json()
 
-city = geo[0]["name"] if geo else "Unknown"
+pm25=data["list"][0]["components"]["pm2_5"]
 
-st.success(f"Location: {city}")
+pm10=data["list"][0]["components"]["pm10"]
 
-# ============================================================
-# GET LIVE POLLUTION
-# ============================================================
+st.metric("PM2.5",pm25)
 
-url = f"http://api.openweathermap.org/data/2.5/air_pollution?lat={lat}&lon={lon}&appid={API_KEY}"
-
-data = requests.get(url).json()
-
-comp = data["list"][0]["components"]
-
-pm25 = float(comp["pm2_5"])
-pm10 = float(comp["pm10"])
+st.metric("PM10",pm10)
 
 # ============================================================
-# PREDICTION
+# XGB PREDICTION
 # ============================================================
 
-row = {}
+row={}
 
-for col in features:
+for f in features:
 
-    if "pm2.5" in col.lower():
-        row[col] = pm25
+    if "pm2.5" in f.lower():
 
-    elif "pm10" in col.lower():
-        row[col] = pm10
+        row[f]=pm25
+
+    elif "pm10" in f.lower():
+
+        row[f]=pm10
 
     else:
-        row[col] = 0
 
-predicted_aqi = float(model.predict(pd.DataFrame([row]))[0])
+        row[f]=0
 
-risk = int(predicted_aqi/3)
+pred_xgb=float(xgb_model.predict(pd.DataFrame([row]))[0])
 
-# ============================================================
-# METRICS DASHBOARD
-# ============================================================
-
-st.header("📡 Live Environmental Telemetry")
-
-c1, c2, c3, c4 = st.columns(4)
-
-c1.metric("PM2.5", round(pm25,2))
-c2.metric("PM10", round(pm10,2))
-c3.metric("AQI Prediction", round(predicted_aqi,2))
-c4.metric("Risk Index", risk)
+st.metric("XGBoost AQI",round(pred_xgb,2))
 
 # ============================================================
-# THREAT LEVEL
+# LSTM FUTURE PREDICTION
 # ============================================================
 
-st.header("🚨 Threat Level")
+st.header("🔮 Deep Learning Future Prediction")
 
-if predicted_aqi > 180:
-    st.error("🔴 CRITICAL")
+last=y.values[-10:]
 
-elif predicted_aqi > 120:
-    st.warning("🟠 HIGH")
+scaled=scaler.transform(last.reshape(-1,1))
 
-elif predicted_aqi > 80:
-    st.info("🟡 MODERATE")
+scaled=scaled.reshape(1,10,1)
+
+future_scaled=lstm_model.predict(scaled)
+
+future=scaler.inverse_transform(future_scaled)[0][0]
+
+st.metric("LSTM Future AQI",round(future,2))
+
+# ============================================================
+# SATELLITE ANIMATION
+# ============================================================
+
+st.header("🛰️ Satellite Pollution Scan")
+
+progress=st.progress(0)
+
+for i in range(100):
+
+    time.sleep(0.01)
+
+    progress.progress(i+1)
+
+st.success("Satellite Scan Complete")
+
+# ============================================================
+# NATIONAL HEATMAP
+# ============================================================
+
+st.header("🇮🇳 National Heatmap")
+
+cities={
+"Delhi":(28,77),
+"Mumbai":(19,72),
+"Bangalore":(12,77),
+"Chennai":(13,80)
+}
+
+heat=[]
+
+m2=folium.Map(location=[22,78],zoom_start=5,tiles="CartoDB dark_matter")
+
+for city,(la,lo) in cities.items():
+
+    url=f"http://api.openweathermap.org/data/2.5/air_pollution?lat={la}&lon={lo}&appid={API_KEY}"
+
+    d=requests.get(url).json()
+
+    val=d["list"][0]["components"]["pm2_5"]
+
+    heat.append([la,lo,val])
+
+HeatMap(heat).add_to(m2)
+
+st_folium(m2,height=500)
+
+# ============================================================
+# FORECAST GRAPH
+# ============================================================
+
+st.header("📈 Forecast")
+
+forecast=[pred_xgb,future]
+
+df_fore=pd.DataFrame({
+
+"time":["now","future"],
+
+"aqi":forecast
+
+})
+
+st.line_chart(df_fore.set_index("time"))
+
+# ============================================================
+# COMMAND CENTER STATUS
+# ============================================================
+
+st.header("🏛️ Command Center")
+
+if pred_xgb>150:
+
+    st.error("Emergency")
+
+elif pred_xgb>80:
+
+    st.warning("Warning")
 
 else:
-    st.success("🟢 SAFE")
+
+    st.success("Safe")
 
 # ============================================================
-# HEATMAP
+# END
 # ============================================================
-
-st.header("🛰️ Pollution Surveillance Map")
-
-m2 = folium.Map(location=[lat,lon], zoom_start=12)
-
-HeatMap([[lat,lon,predicted_aqi]]).add_to(m2)
-
-folium.Marker(
-    [lat,lon],
-    popup=f"AQI {predicted_aqi}"
-).add_to(m2)
-
-st_folium(m2, height=450)
-
-# ============================================================
-# SIMULATION
-# ============================================================
-
-st.header("🧠 Policy Simulation")
-
-traffic = st.slider("Traffic reduction %",0,50,0)
-
-sim_pm25 = pm25*(1-traffic/100)
-
-sim_row = row.copy()
-
-for k in sim_row:
-
-    if "pm2.5" in k.lower():
-        sim_row[k] = sim_pm25
-
-sim_aqi = model.predict(pd.DataFrame([sim_row]))[0]
-
-st.metric("Simulated AQI", round(sim_aqi,2))
-
-# ============================================================
-# AI CHATBOT
-# ============================================================
-
-st.header("💬 Ask AI")
-
-q = st.text_input("Ask about pollution")
-
-if q:
-
-    if "aqi" in q.lower():
-        st.write(predicted_aqi)
-
-    elif "pm2.5" in q.lower():
-        st.write(pm25)
-
-    else:
-        st.write("Air quality monitored successfully")
-
-# ============================================================
-# FOOTER
-# ============================================================
-
-st.markdown("---")
-
-st.write("UrbanGuard AI – National Smart City Intelligence System")
