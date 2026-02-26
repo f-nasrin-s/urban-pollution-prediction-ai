@@ -6,3 +6,5 @@ matplotlib
 plotly
 scikit-learn
 geopy
+folium
+streamlit-folium
