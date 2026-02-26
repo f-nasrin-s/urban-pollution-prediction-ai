@@ -1,6 +1,6 @@
 # ============================================================
-# URBANGUARD AI – ISRO LEVEL NATIONAL POLLUTION INTELLIGENCE
-# WITH GEMINI AI COPILOT
+# ISRO-LEVEL SMART CITY URBAN POLLUTION COMMAND CENTER
+# Gemini AI Copilot + LSTM Prediction + National Heatmap
 # ============================================================
 
 import streamlit as st
@@ -10,338 +10,315 @@ import requests
 import folium
 import pytz
 import time
-import google.generativeai as genai
 
-from datetime import datetime
+from datetime import datetime, timedelta
 from streamlit_folium import st_folium
-from folium.plugins import HeatMap
-
-from sklearn.preprocessing import LabelEncoder, MinMaxScaler
-from sklearn.model_selection import train_test_split
+from folium.plugins import HeatMap, TimestampedGeoJson
 
 from xgboost import XGBRegressor
+from sklearn.preprocessing import LabelEncoder
+from sklearn.model_selection import train_test_split
 
 from tensorflow.keras.models import Sequential
 from tensorflow.keras.layers import LSTM, Dense
 
-import streamlit.components.v1 as components
+import google.generativeai as genai
 
 # ============================================================
-# CONFIG
+# PAGE CONFIG (ISRO STYLE)
 # ============================================================
 
 st.set_page_config(
-    page_title="UrbanGuard AI – National Pollution Intelligence",
-    layout="wide"
+    page_title="ISRO UrbanGuard AI",
+    layout="wide",
+    page_icon="🛰️"
 )
 
-st.title("🛰️ UrbanGuard AI – National Smart City Pollution Intelligence System")
+st.title("🛰️ ISRO UrbanGuard AI – National Pollution Intelligence System")
 
 ist = pytz.timezone("Asia/Kolkata")
-st.caption(f"⏱️ {datetime.now(ist).strftime('%d %b %Y | %H:%M:%S IST')}")
+st.caption(datetime.now(ist).strftime("%d %b %Y | %H:%M:%S IST"))
 
 # ============================================================
-# API KEYS
+# LOAD API KEYS
 # ============================================================
 
-OPENWEATHER = st.secrets.get("OPENWEATHER_API_KEY", "")
-GEMINI_KEY = st.secrets.get("GEMINI_API_KEY", "")
+OPENWEATHER_API_KEY = st.secrets["OPENWEATHER_API_KEY"]
+GEMINI_API_KEY = st.secrets["GEMINI_API_KEY"]
 
-# Configure Gemini
-genai.configure(api_key=GEMINI_KEY)
-
-# ============================================================
-# LOAD DATA
-# ============================================================
-
-@st.cache_resource
-def load_data():
-
-    df = pd.read_csv("TRAQID.csv")
-
-    aqi_col = [c for c in df.columns if "aqi" in c.lower()][0]
-
-    drop_cols = ["Image","created_at","Sequence","aqi_cat",aqi_col]
-
-    X = df.drop(columns=[c for c in drop_cols if c in df.columns])
-    y = df[aqi_col]
-
-    for col in X.select_dtypes(include="object").columns:
-
-        le = LabelEncoder()
-        X[col] = le.fit_transform(X[col])
-
-    return X,y,X.columns.tolist()
-
-X,y,features = load_data()
+genai.configure(api_key=GEMINI_API_KEY)
 
 # ============================================================
-# XGBOOST MODEL
+# GEMINI COPILOT
+# ============================================================
+
+def gemini_response(prompt):
+
+    model = genai.GenerativeModel("gemini-1.5-flash")
+
+    response = model.generate_content(prompt)
+
+    return response.text
+
+
+# ============================================================
+# TRAIN XGBOOST MODEL
 # ============================================================
 
 @st.cache_resource
 def train_xgb():
 
-    model = XGBRegressor(n_estimators=150,max_depth=6)
+    df = pd.read_csv("TRAQID.csv")
 
-    model.fit(X,y)
+    aqi_col = [c for c in df.columns if "aqi" in c.lower()][0]
 
-    return model
+    X = df.drop(columns=[aqi_col])
+    y = df[aqi_col]
 
-xgb_model = train_xgb()
+    for col in X.select_dtypes(include="object"):
+
+        le = LabelEncoder()
+        X[col] = le.fit_transform(X[col])
+
+    X_train, _, y_train, _ = train_test_split(
+        X, y, test_size=0.2
+    )
+
+    model = XGBRegressor()
+
+    model.fit(X_train, y_train)
+
+    return model, X.columns.tolist()
+
+xgb_model, features = train_xgb()
+
 
 # ============================================================
-# LSTM MODEL
+# TRAIN LSTM MODEL
 # ============================================================
 
 @st.cache_resource
 def train_lstm():
 
-    scaler = MinMaxScaler()
+    data = pd.read_csv("TRAQID.csv")
 
-    y_scaled = scaler.fit_transform(y.values.reshape(-1,1))
+    aqi_col = [c for c in data.columns if "aqi" in c.lower()][0]
 
-    seq=10
+    series = data[aqi_col].values
 
-    X_lstm=[]
-    y_lstm=[]
+    X = []
+    y = []
 
-    for i in range(seq,len(y_scaled)):
+    for i in range(10, len(series)):
 
-        X_lstm.append(y_scaled[i-seq:i])
-        y_lstm.append(y_scaled[i])
+        X.append(series[i-10:i])
+        y.append(series[i])
 
-    X_lstm,y_lstm=np.array(X_lstm),np.array(y_lstm)
+    X = np.array(X)
+    y = np.array(y)
 
-    model=Sequential()
-    model.add(LSTM(50,input_shape=(seq,1)))
+    X = X.reshape(X.shape[0], X.shape[1], 1)
+
+    model = Sequential()
+
+    model.add(LSTM(50))
     model.add(Dense(1))
 
-    model.compile(loss="mse",optimizer="adam")
+    model.compile("adam", "mse")
 
-    model.fit(X_lstm,y_lstm,epochs=5,verbose=0)
+    model.fit(X, y, epochs=3, verbose=0)
 
-    return model,scaler
+    return model, series
 
-lstm_model,scaler=train_lstm()
+lstm_model, series = train_lstm()
 
-# ============================================================
-# GPS DETECT
-# ============================================================
-
-def gps():
-
-    html = """
-    <script>
-    navigator.geolocation.getCurrentPosition(
-    (pos)=>{
-    const coords=pos.coords.latitude+","+pos.coords.longitude;
-    const input=window.parent.document.querySelector('input');
-    input.value=coords;
-    input.dispatchEvent(new Event('input',{bubbles:true}));
-    });
-    </script>
-    """
-
-    components.html(html)
 
 # ============================================================
-# LOCATION
+# LOCATION MAP
 # ============================================================
 
-st.header("📍 Location Selection")
+st.subheader("📍 Select Location")
 
-mode=st.radio(
-"Select Location Method",
-["Map","Auto Detect"]
-)
+map1 = folium.Map(location=[20.5937, 78.9629], zoom_start=5)
 
-lat,lon=None,None
+map_data = st_folium(map1)
 
-if mode=="Auto Detect":
+if map_data and map_data.get("last_clicked"):
 
-    gps_val=st.text_input("GPS Coordinates")
-
-    if st.button("Detect My Location"):
-
-        gps()
-
-    if gps_val:
-
-        lat,lon=map(float,gps_val.split(","))
+    lat = map_data["last_clicked"]["lat"]
+    lon = map_data["last_clicked"]["lng"]
 
 else:
 
-    m=folium.Map(location=[22,78],zoom_start=5)
-
-    data=st_folium(m,height=400)
-
-    if data and data["last_clicked"]:
-
-        lat=data["last_clicked"]["lat"]
-        lon=data["last_clicked"]["lng"]
-
-if lat is None:
-
     st.stop()
 
-# ============================================================
-# LIVE AQI
-# ============================================================
-
-url=f"http://api.openweathermap.org/data/2.5/air_pollution?lat={lat}&lon={lon}&appid={OPENWEATHER}"
-
-data=requests.get(url).json()
-
-pm25=data["list"][0]["components"]["pm2_5"]
-pm10=data["list"][0]["components"]["pm10"]
-
-st.metric("PM2.5",round(pm25,2))
-st.metric("PM10",round(pm10,2))
 
 # ============================================================
-# XGB PREDICTION
+# GET LIVE POLLUTION DATA
 # ============================================================
 
-row={}
+url = f"http://api.openweathermap.org/data/2.5/air_pollution?lat={lat}&lon={lon}&appid={OPENWEATHER_API_KEY}"
+
+data = requests.get(url).json()
+
+pm25 = data["list"][0]["components"]["pm2_5"]
+pm10 = data["list"][0]["components"]["pm10"]
+
+col1, col2 = st.columns(2)
+
+col1.metric("PM2.5", pm25)
+col2.metric("PM10", pm10)
+
+
+# ============================================================
+# AQI PREDICTION
+# ============================================================
+
+row = {f: 0 for f in features}
 
 for f in features:
 
     if "pm2.5" in f.lower():
 
-        row[f]=pm25
+        row[f] = pm25
 
-    elif "pm10" in f.lower():
+    if "pm10" in f.lower():
 
-        row[f]=pm10
+        row[f] = pm10
 
-    else:
+predicted_aqi = xgb_model.predict(pd.DataFrame([row]))[0]
 
-        row[f]=0
+st.metric("Predicted AQI", predicted_aqi)
 
-pred_xgb=float(xgb_model.predict(pd.DataFrame([row]))[0])
-
-st.metric("Current AQI Prediction",round(pred_xgb,2))
 
 # ============================================================
-# LSTM FUTURE
+# FUTURE PREDICTION (LSTM)
 # ============================================================
 
-last=y.values[-10:]
+st.subheader("📈 7-Day Future AQI Forecast")
 
-scaled=scaler.transform(last.reshape(-1,1))
-scaled=scaled.reshape(1,10,1)
+last_seq = series[-10:]
 
-future_scaled=lstm_model.predict(scaled)
+future = []
 
-future=scaler.inverse_transform(future_scaled)[0][0]
+seq = last_seq.copy()
 
-st.metric("Future AQI Prediction",round(future,2))
+for i in range(7):
+
+    pred = lstm_model.predict(
+        seq.reshape(1,10,1),
+        verbose=0
+    )[0][0]
+
+    future.append(pred)
+
+    seq = np.append(seq[1:], pred)
+
+future_df = pd.DataFrame({
+
+    "Day": range(1,8),
+    "Predicted AQI": future
+})
+
+st.line_chart(future_df.set_index("Day"))
+
 
 # ============================================================
 # NATIONAL HEATMAP
 # ============================================================
 
-st.header("🇮🇳 National Pollution Heatmap")
+st.subheader("🇮🇳 National Pollution Heatmap")
 
-cities={
-"Delhi":(28.6,77.2),
-"Mumbai":(19.0,72.8),
-"Bangalore":(12.9,77.5),
-"Chennai":(13.0,80.2)
-}
+cities = [
 
-heat=[]
+    (28.6,77.2),
+    (19.0,72.8),
+    (13.0,80.2),
+    (22.5,88.3),
+    (17.3,78.4),
+]
 
-m2=folium.Map(location=[22,78],zoom_start=5,tiles="CartoDB dark_matter")
+heat_data = []
 
-for city,(la,lo) in cities.items():
-
-    url=f"http://api.openweathermap.org/data/2.5/air_pollution?lat={la}&lon={lo}&appid={OPENWEATHER}"
-
-    d=requests.get(url).json()
-
-    val=d["list"][0]["components"]["pm2_5"]
-
-    heat.append([la,lo,val])
-
-HeatMap(heat).add_to(m2)
-
-st_folium(m2,height=500)
-
-# ============================================================
-# SATELLITE SCAN SIMULATION
-# ============================================================
-
-st.header("🛰️ Satellite Scan")
-
-progress=st.progress(0)
-
-for i in range(100):
-
-    time.sleep(0.01)
-    progress.progress(i+1)
-
-st.success("Satellite Scan Complete")
-
-# ============================================================
-# GEMINI AI COPILOT
-# ============================================================
-
-st.header("🤖 Gemini AI Copilot")
-
-user_question=st.text_input(
-"Ask Gemini about pollution, health, or solutions:"
-)
-
-if user_question:
+for c in cities:
 
     try:
 
-        model=genai.GenerativeModel("gemini-1.5-flash")
+        url = f"http://api.openweathermap.org/data/2.5/air_pollution?lat={c[0]}&lon={c[1]}&appid={OPENWEATHER_API_KEY}"
 
-        prompt=f"""
-        You are an environmental AI expert.
+        d = requests.get(url).json()
 
-        Current AQI: {pred_xgb}
-        Future AQI: {future}
-        PM2.5: {pm25}
-        PM10: {pm10}
+        pm = d["list"][0]["components"]["pm2_5"]
 
-        User Question: {user_question}
+        heat_data.append([c[0], c[1], pm])
 
-        Provide:
-        - Risk analysis
-        - Health impact
-        - Recommended actions
-        """
+    except:
 
-        response=model.generate_content(prompt)
+        pass
 
-        st.success(response.text)
+map2 = folium.Map(location=[22,78], zoom_start=5)
 
-    except Exception as e:
+HeatMap(heat_data).add_to(map2)
 
-        st.error("Gemini error. Check API key.")
+st_folium(map2)
+
 
 # ============================================================
-# COMMAND CENTER STATUS
+# SATELLITE ANIMATION
 # ============================================================
 
-st.header("🏛️ National Command Center")
+st.subheader("🛰️ Satellite Pollution Animation")
 
-if pred_xgb>150:
+features_anim = []
 
-    st.error("🚨 Emergency Pollution Level")
+for i in range(10):
 
-elif pred_xgb>80:
+    features_anim.append({
 
-    st.warning("⚠️ Moderate Pollution")
+        "type":"Feature",
+        "geometry":{
+            "type":"Point",
+            "coordinates":[lon,lat]
+        },
+        "properties":{
+            "time":(datetime.now()+timedelta(hours=i)).isoformat(),
+            "style":{"color":"red"}
+        }
 
-else:
+    })
 
-    st.success("✅ Safe Air Quality")
+TimestampedGeoJson({
+
+    "type":"FeatureCollection",
+    "features":features_anim
+
+}).add_to(map2)
+
+st_folium(map2)
+
 
 # ============================================================
-# END
+# GEMINI COPILOT
 # ============================================================
+
+st.subheader("🤖 Gemini AI Copilot")
+
+user_q = st.text_input("Ask AI about pollution")
+
+if user_q:
+
+    prompt = f"""
+
+    AQI: {predicted_aqi}
+
+    PM2.5: {pm25}
+
+    PM10: {pm10}
+
+    Question: {user_q}
+
+    """
+
+    answer = gemini_response(prompt)
+
+    st.write(answer)
