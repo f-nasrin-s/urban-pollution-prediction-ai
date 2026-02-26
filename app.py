@@ -1,5 +1,6 @@
 # ============================================================
-# URBANGUARD AI – ISRO-LEVEL NATIONAL POLLUTION INTELLIGENCE
+# URBANGUARD AI – ISRO LEVEL NATIONAL POLLUTION INTELLIGENCE
+# WITH GEMINI AI COPILOT
 # ============================================================
 
 import streamlit as st
@@ -9,6 +10,7 @@ import requests
 import folium
 import pytz
 import time
+import google.generativeai as genai
 
 from datetime import datetime
 from streamlit_folium import st_folium
@@ -33,24 +35,20 @@ st.set_page_config(
     layout="wide"
 )
 
-st.title("🛰️ UrbanGuard AI – National Smart City Pollution Intelligence")
+st.title("🛰️ UrbanGuard AI – National Smart City Pollution Intelligence System")
 
 ist = pytz.timezone("Asia/Kolkata")
 st.caption(f"⏱️ {datetime.now(ist).strftime('%d %b %Y | %H:%M:%S IST')}")
 
-API_KEY = st.secrets.get("OPENWEATHER_API_KEY", "")
-
 # ============================================================
-# SATELLITE STATUS
+# API KEYS
 # ============================================================
 
-st.header("🛰️ Satellite Network Status")
+OPENWEATHER = st.secrets.get("OPENWEATHER_API_KEY", "")
+GEMINI_KEY = st.secrets.get("GEMINI_API_KEY", "")
 
-c1, c2, c3 = st.columns(3)
-
-c1.success("ISRO INSAT-3D: ACTIVE")
-c2.success("NASA Aura: ACTIVE")
-c3.success("ESA Sentinel-5P: ACTIVE")
+# Configure Gemini
+genai.configure(api_key=GEMINI_KEY)
 
 # ============================================================
 # LOAD DATA
@@ -66,21 +64,19 @@ def load_data():
     drop_cols = ["Image","created_at","Sequence","aqi_cat",aqi_col]
 
     X = df.drop(columns=[c for c in drop_cols if c in df.columns])
-
     y = df[aqi_col]
 
     for col in X.select_dtypes(include="object").columns:
 
         le = LabelEncoder()
-
         X[col] = le.fit_transform(X[col])
 
-    return X, y, X.columns.tolist()
+    return X,y,X.columns.tolist()
 
-X, y, features = load_data()
+X,y,features = load_data()
 
 # ============================================================
-# TRAIN XGBOOST MODEL
+# XGBOOST MODEL
 # ============================================================
 
 @st.cache_resource
@@ -95,7 +91,7 @@ def train_xgb():
 xgb_model = train_xgb()
 
 # ============================================================
-# TRAIN LSTM MODEL
+# LSTM MODEL
 # ============================================================
 
 @st.cache_resource
@@ -105,24 +101,20 @@ def train_lstm():
 
     y_scaled = scaler.fit_transform(y.values.reshape(-1,1))
 
-    X_lstm = []
+    seq=10
 
-    y_lstm = []
-
-    seq = 10
+    X_lstm=[]
+    y_lstm=[]
 
     for i in range(seq,len(y_scaled)):
 
         X_lstm.append(y_scaled[i-seq:i])
-
         y_lstm.append(y_scaled[i])
 
-    X_lstm,y_lstm = np.array(X_lstm),np.array(y_lstm)
+    X_lstm,y_lstm=np.array(X_lstm),np.array(y_lstm)
 
-    model = Sequential()
-
+    model=Sequential()
     model.add(LSTM(50,input_shape=(seq,1)))
-
     model.add(Dense(1))
 
     model.compile(loss="mse",optimizer="adam")
@@ -131,7 +123,7 @@ def train_lstm():
 
     return model,scaler
 
-lstm_model, scaler = train_lstm()
+lstm_model,scaler=train_lstm()
 
 # ============================================================
 # GPS DETECT
@@ -159,8 +151,8 @@ def gps():
 
 st.header("📍 Location Selection")
 
-mode = st.radio(
-"Select",
+mode=st.radio(
+"Select Location Method",
 ["Map","Auto Detect"]
 )
 
@@ -168,9 +160,9 @@ lat,lon=None,None
 
 if mode=="Auto Detect":
 
-    gps_val=st.text_input("GPS")
+    gps_val=st.text_input("GPS Coordinates")
 
-    if st.button("Detect"):
+    if st.button("Detect My Location"):
 
         gps()
 
@@ -187,7 +179,6 @@ else:
     if data and data["last_clicked"]:
 
         lat=data["last_clicked"]["lat"]
-
         lon=data["last_clicked"]["lng"]
 
 if lat is None:
@@ -198,17 +189,15 @@ if lat is None:
 # LIVE AQI
 # ============================================================
 
-url=f"http://api.openweathermap.org/data/2.5/air_pollution?lat={lat}&lon={lon}&appid={API_KEY}"
+url=f"http://api.openweathermap.org/data/2.5/air_pollution?lat={lat}&lon={lon}&appid={OPENWEATHER}"
 
 data=requests.get(url).json()
 
 pm25=data["list"][0]["components"]["pm2_5"]
-
 pm10=data["list"][0]["components"]["pm10"]
 
-st.metric("PM2.5",pm25)
-
-st.metric("PM10",pm10)
+st.metric("PM2.5",round(pm25,2))
+st.metric("PM10",round(pm10,2))
 
 # ============================================================
 # XGB PREDICTION
@@ -232,53 +221,34 @@ for f in features:
 
 pred_xgb=float(xgb_model.predict(pd.DataFrame([row]))[0])
 
-st.metric("XGBoost AQI",round(pred_xgb,2))
+st.metric("Current AQI Prediction",round(pred_xgb,2))
 
 # ============================================================
-# LSTM FUTURE PREDICTION
+# LSTM FUTURE
 # ============================================================
-
-st.header("🔮 Deep Learning Future Prediction")
 
 last=y.values[-10:]
 
 scaled=scaler.transform(last.reshape(-1,1))
-
 scaled=scaled.reshape(1,10,1)
 
 future_scaled=lstm_model.predict(scaled)
 
 future=scaler.inverse_transform(future_scaled)[0][0]
 
-st.metric("LSTM Future AQI",round(future,2))
-
-# ============================================================
-# SATELLITE ANIMATION
-# ============================================================
-
-st.header("🛰️ Satellite Pollution Scan")
-
-progress=st.progress(0)
-
-for i in range(100):
-
-    time.sleep(0.01)
-
-    progress.progress(i+1)
-
-st.success("Satellite Scan Complete")
+st.metric("Future AQI Prediction",round(future,2))
 
 # ============================================================
 # NATIONAL HEATMAP
 # ============================================================
 
-st.header("🇮🇳 National Heatmap")
+st.header("🇮🇳 National Pollution Heatmap")
 
 cities={
-"Delhi":(28,77),
-"Mumbai":(19,72),
-"Bangalore":(12,77),
-"Chennai":(13,80)
+"Delhi":(28.6,77.2),
+"Mumbai":(19.0,72.8),
+"Bangalore":(12.9,77.5),
+"Chennai":(13.0,80.2)
 }
 
 heat=[]
@@ -287,7 +257,7 @@ m2=folium.Map(location=[22,78],zoom_start=5,tiles="CartoDB dark_matter")
 
 for city,(la,lo) in cities.items():
 
-    url=f"http://api.openweathermap.org/data/2.5/air_pollution?lat={la}&lon={lo}&appid={API_KEY}"
+    url=f"http://api.openweathermap.org/data/2.5/air_pollution?lat={la}&lon={lo}&appid={OPENWEATHER}"
 
     d=requests.get(url).json()
 
@@ -300,40 +270,77 @@ HeatMap(heat).add_to(m2)
 st_folium(m2,height=500)
 
 # ============================================================
-# FORECAST GRAPH
+# SATELLITE SCAN SIMULATION
 # ============================================================
 
-st.header("📈 Forecast")
+st.header("🛰️ Satellite Scan")
 
-forecast=[pred_xgb,future]
+progress=st.progress(0)
 
-df_fore=pd.DataFrame({
+for i in range(100):
 
-"time":["now","future"],
+    time.sleep(0.01)
+    progress.progress(i+1)
 
-"aqi":forecast
+st.success("Satellite Scan Complete")
 
-})
+# ============================================================
+# GEMINI AI COPILOT
+# ============================================================
 
-st.line_chart(df_fore.set_index("time"))
+st.header("🤖 Gemini AI Copilot")
+
+user_question=st.text_input(
+"Ask Gemini about pollution, health, or solutions:"
+)
+
+if user_question:
+
+    try:
+
+        model=genai.GenerativeModel("gemini-1.5-flash")
+
+        prompt=f"""
+        You are an environmental AI expert.
+
+        Current AQI: {pred_xgb}
+        Future AQI: {future}
+        PM2.5: {pm25}
+        PM10: {pm10}
+
+        User Question: {user_question}
+
+        Provide:
+        - Risk analysis
+        - Health impact
+        - Recommended actions
+        """
+
+        response=model.generate_content(prompt)
+
+        st.success(response.text)
+
+    except Exception as e:
+
+        st.error("Gemini error. Check API key.")
 
 # ============================================================
 # COMMAND CENTER STATUS
 # ============================================================
 
-st.header("🏛️ Command Center")
+st.header("🏛️ National Command Center")
 
 if pred_xgb>150:
 
-    st.error("Emergency")
+    st.error("🚨 Emergency Pollution Level")
 
 elif pred_xgb>80:
 
-    st.warning("Warning")
+    st.warning("⚠️ Moderate Pollution")
 
 else:
 
-    st.success("Safe")
+    st.success("✅ Safe Air Quality")
 
 # ============================================================
 # END
