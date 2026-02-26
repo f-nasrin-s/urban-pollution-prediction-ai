@@ -1,9 +1,10 @@
 streamlit
 pandas
 numpy
-requests
 folium
 streamlit-folium
-xgboost
-scikit-learn
+requests
 pytz
+scikit-learn
+xgboost
+plotly
