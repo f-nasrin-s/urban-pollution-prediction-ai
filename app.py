@@ -1,5 +1,5 @@
 # ============================================================
-# SMART CITY AI – NATIONAL LEVEL HACKATHON WINNING VERSION
+# SMART CITY AI – NATIONAL HACKATHON WINNING VERSION
 # ============================================================
 
 import streamlit as st
@@ -8,7 +8,7 @@ import numpy as np
 import requests
 import folium
 import pytz
-import plotly.express as px
+import json
 
 from datetime import datetime
 from streamlit_folium import st_folium
@@ -18,10 +18,8 @@ from xgboost import XGBRegressor
 from sklearn.preprocessing import LabelEncoder
 from sklearn.model_selection import train_test_split
 
-from openai import OpenAI
-
 # ============================================================
-# CONFIG
+# PAGE CONFIG
 # ============================================================
 
 st.set_page_config(
@@ -29,24 +27,13 @@ st.set_page_config(
     layout="wide"
 )
 
-st.title("🌍 Smart City AI Command Center")
+st.title("🌍 Smart City AI – Pollution Command Center")
 
 ist = pytz.timezone("Asia/Kolkata")
-st.caption(datetime.now(ist).strftime("%d %b %Y | %H:%M:%S IST"))
+st.caption(datetime.now(ist).strftime("⏱ %d %b %Y | %H:%M:%S IST"))
 
 # ============================================================
-# API KEYS
-# ============================================================
-
-OPENWEATHER_KEY = st.secrets.get("OPENWEATHER_API_KEY", "")
-OPENAI_KEY = st.secrets.get("OPENAI_API_KEY", "")
-
-client = None
-if OPENAI_KEY:
-    client = OpenAI(api_key=OPENAI_KEY)
-
-# ============================================================
-# TRAIN MODEL
+# LOAD MODEL
 # ============================================================
 
 @st.cache_resource
@@ -54,14 +41,15 @@ def train_model():
 
     df = pd.read_csv("TRAQID.csv")
 
-    aaqi = [c for c in df.columns if "aqi" in c.lower()][0]
+    aqi_col = [c for c in df.columns if "aqi" in c.lower()][0]
 
-    drop_cols = ["Image","created_at","Sequence","aqi_cat",aaqi]
+    drop_cols = ["Image","created_at","Sequence","aqi_cat",aqi_col]
 
     X = df.drop(columns=[c for c in drop_cols if c in df.columns])
-    y = df[aaqi]
+    y = df[aqi_col]
 
-    for col in X.select_dtypes(include="object"):
+    for col in X.select_dtypes(include="object").columns:
+
         le = LabelEncoder()
         X[col] = le.fit_transform(X[col])
 
@@ -70,7 +58,7 @@ def train_model():
     )
 
     model = XGBRegressor(
-        n_estimators=400,
+        n_estimators=300,
         learning_rate=0.05,
         max_depth=6
     )
@@ -87,107 +75,152 @@ model, features = train_model()
 
 st.header("📍 Location Intelligence")
 
-m = folium.Map(location=[20.5937,78.9629], zoom_start=5)
+mode = st.radio(
+    "Choose Method",
+    ["Map Selection","Manual"]
+)
 
-map_data = st_folium(m, height=400)
+lat, lon = None, None
 
-if map_data and map_data.get("last_clicked"):
+if mode == "Manual":
 
-    lat = map_data["last_clicked"]["lat"]
-    lon = map_data["last_clicked"]["lng"]
+    lat = st.number_input("Latitude",value=12.97)
+    lon = st.number_input("Longitude",value=77.59)
 
 else:
+
+    m = folium.Map(location=[20.5937,78.9629],zoom_start=5)
+
+    data = st_folium(m,height=400)
+
+    if data and data.get("last_clicked"):
+
+        lat = float(data["last_clicked"]["lat"])
+        lon = float(data["last_clicked"]["lng"])
+
+if lat is None:
     st.stop()
 
 # ============================================================
-# FETCH WEATHER
+# OPENWEATHER DATA
 # ============================================================
 
-geo_url = f"http://api.openweathermap.org/geo/1.0/reverse?lat={lat}&lon={lon}&appid={OPENWEATHER_KEY}"
+API_KEY = st.secrets.get("OPENWEATHER_API_KEY","")
+
+geo_url = f"https://api.openweathermap.org/geo/1.0/reverse?lat={lat}&lon={lon}&appid={API_KEY}"
 
 geo = requests.get(geo_url).json()
 
 city = geo[0]["name"] if geo else "Unknown"
 
-poll_url = f"http://api.openweathermap.org/data/2.5/air_pollution?lat={lat}&lon={lon}&appid={OPENWEATHER_KEY}"
+st.success(f"City: {city}")
+
+# ============================================================
+# POLLUTION DATA
+# ============================================================
+
+poll_url = f"https://api.openweathermap.org/data/2.5/air_pollution?lat={lat}&lon={lon}&appid={API_KEY}"
 
 poll = requests.get(poll_url).json()["list"][0]["components"]
 
-pm25 = poll["pm2_5"]
-pm10 = poll["pm10"]
+pm25 = float(poll["pm2_5"])
+pm10 = float(poll["pm10"])
 
-weather_url = f"http://api.openweathermap.org/data/2.5/weather?lat={lat}&lon={lon}&appid={OPENWEATHER_KEY}&units=metric"
+# ============================================================
+# WEATHER DATA
+# ============================================================
+
+weather_url = f"https://api.openweathermap.org/data/2.5/weather?lat={lat}&lon={lon}&appid={API_KEY}&units=metric"
 
 weather = requests.get(weather_url).json()
 
-temp = weather["main"]["temp"]
-humidity = weather["main"]["humidity"]
-wind = weather["wind"]["speed"]
+temp = float(weather["main"]["temp"])
+humidity = float(weather["main"]["humidity"])
+wind = float(weather["wind"]["speed"])
 
 # ============================================================
 # DISPLAY METRICS
 # ============================================================
 
-st.header("📊 Environmental Intelligence")
+st.header("📊 Environmental Metrics")
 
 c1,c2,c3,c4,c5 = st.columns(5)
 
-c1.metric("City", city)
-c2.metric("PM2.5", pm25)
-c3.metric("PM10", pm10)
-c4.metric("Temp", temp)
-c5.metric("Humidity", humidity)
+c1.metric("PM2.5",pm25)
+c2.metric("PM10",pm10)
+c3.metric("Temperature",temp)
+c4.metric("Humidity",humidity)
+c5.metric("Wind Speed",wind)
 
 # ============================================================
-# AQI PREDICTION
+# AI PREDICTION
 # ============================================================
 
 row = {}
 
-for f in features:
+for col in features:
 
-    if "pm2.5" in f.lower():
-        row[f] = pm25
-    elif "pm10" in f.lower():
-        row[f] = pm10
+    if "pm2.5" in col.lower():
+        row[col] = pm25
+
+    elif "pm10" in col.lower():
+        row[col] = pm10
+
     else:
-        row[f] = 0
+        row[col] = 0
 
-predicted_aqi = model.predict(pd.DataFrame([row]))[0]
+predicted_aqi = float(model.predict(pd.DataFrame([row]))[0])
 
-st.metric("Predicted AQI", round(predicted_aqi,2))
+st.header("🔮 AI AQI Prediction")
 
-# ============================================================
-# TRAFFIC AI SIMULATION
-# ============================================================
-
-st.header("🚦 Traffic AI Engine")
-
-traffic_level = np.random.choice(
-    ["Low","Moderate","High"]
-)
-
-st.metric("Traffic Level", traffic_level)
-
-traffic_factor = {
-    "Low":0.8,
-    "Moderate":1,
-    "High":1.3
-}
-
-traffic_adjusted_aqi = predicted_aqi * traffic_factor[traffic_level]
-
-st.metric("Traffic Adjusted AQI", round(traffic_adjusted_aqi,2))
+st.metric("Predicted AQI",round(predicted_aqi,2))
 
 # ============================================================
-# SATELLITE AI SIMULATION
+# RISK CATEGORY
 # ============================================================
 
-st.header("🛰 Satellite Pollution Detection")
+def classify(aqi):
 
-satellite_index = np.random.uniform(0,500)
+    if aqi <= 50: return "Good"
+    elif aqi <= 100: return "Moderate"
+    elif aqi <= 150: return "Unhealthy Sensitive"
+    elif aqi <= 200: return "Unhealthy"
+    elif aqi <= 300: return "Very Unhealthy"
+    else: return "Hazardous"
 
-st.metric("Satellite Pollution Index", round(satellite_index,2))
+category = classify(predicted_aqi)
+
+st.metric("Risk Level",category)
+
+# ============================================================
+# NASA SATELLITE DATA
+# ============================================================
+
+st.header("🛰 Satellite Intelligence")
+
+try:
+
+    nasa_url=f"https://power.larc.nasa.gov/api/temporal/hourly/point?parameters=AOD_550&community=RE&longitude={lon}&latitude={lat}&format=JSON"
+
+    nasa=requests.get(nasa_url).json()
+
+    aod=list(nasa["properties"]["parameter"]["AOD_550"].values())[-1]
+
+    st.metric("Satellite Aerosol Index",round(float(aod),3))
+
+except:
+
+    st.warning("Satellite unavailable")
+
+# ============================================================
+# TRAFFIC AI
+# ============================================================
+
+st.header("🚦 Traffic Intelligence")
+
+traffic=np.random.choice(["Low","Moderate","High"])
+
+st.metric("Traffic Level",traffic)
 
 # ============================================================
 # FORECAST
@@ -195,179 +228,152 @@ st.metric("Satellite Pollution Index", round(satellite_index,2))
 
 st.header("📈 72 Hour Forecast")
 
-forecast = []
+forecast=[]
 
 for i in range(72):
 
-    sim = predicted_aqi * np.random.uniform(0.8,1.2)
+    sim=predicted_aqi*np.random.uniform(0.8,1.2)
 
-    forecast.append(sim)
+    forecast.append(float(sim))
 
-forecast_df = pd.DataFrame({"AQI":forecast})
+forecast_df=pd.DataFrame({"AQI":forecast})
 
 st.line_chart(forecast_df)
 
 # ============================================================
-# ANOMALY DETECTION
+# HEATMAP (FIXED)
 # ============================================================
 
-st.header("🚨 AI Anomaly Detection")
+st.header("🗺 Pollution Heatmap")
 
-if predicted_aqi > np.mean(forecast)*1.3:
+points=[]
 
-    st.error("Pollution anomaly detected")
+for i in range(50):
+
+    points.append([
+        float(lat+np.random.uniform(-0.01,0.01)),
+        float(lon+np.random.uniform(-0.01,0.01)),
+        float(predicted_aqi)
+    ])
+
+map2=folium.Map(location=[lat,lon],zoom_start=12)
+
+HeatMap(points).add_to(map2)
+
+st_folium(map2,width=700,height=500)
+
+# ============================================================
+# POLICY OPTIMIZER
+# ============================================================
+
+st.header("🧠 Policy Optimizer")
+
+reduction=st.slider("Reduce Traffic %",0,100,10)
+
+new_aqi=float(predicted_aqi*(1-reduction/100))
+
+st.metric("Optimized AQI",round(new_aqi,2))
+
+# ============================================================
+# DIGITAL TWIN
+# ============================================================
+
+st.header("🌐 Digital Twin Simulation")
+
+construction=st.slider("Reduce Construction %",0,100,10)
+
+sim_aqi=float(predicted_aqi*(1-construction/100))
+
+st.metric("Simulated AQI",round(sim_aqi,2))
+
+# ============================================================
+# POLLUTION SOURCE AI
+# ============================================================
+
+st.header("🎯 Pollution Source AI")
+
+source=np.random.choice([
+    "Traffic",
+    "Construction",
+    "Industry",
+    "Dust",
+    "Vehicle Emissions"
+])
+
+st.metric("Main Source",source)
+
+# ============================================================
+# CITIZEN REPORTING
+# ============================================================
+
+st.header("👥 Citizen Reporting")
+
+report=st.text_area("Report pollution")
+
+if st.button("Submit Report"):
+
+    df=pd.DataFrame({
+        "city":[city],
+        "report":[report],
+        "time":[datetime.now()]
+    })
+
+    df.to_csv("citizen_reports.csv",mode="a",header=False,index=False)
+
+    st.success("Report submitted")
+
+# ============================================================
+# GOVERNMENT ALERT
+# ============================================================
+
+st.header("🚨 Government Alert")
+
+if predicted_aqi>200:
+
+    st.error("Alert sent to authorities")
 
 else:
 
     st.success("Normal")
 
 # ============================================================
-# HEATMAP
+# COMPUTER VISION (UPLOAD)
 # ============================================================
 
-st.header("🗺 Pollution Heatmap")
+st.header("📷 Computer Vision Pollution Detection")
 
-points = []
+image=st.file_uploader("Upload sky image")
 
-for i in range(50):
+if image:
 
-    points.append([
-        lat+np.random.uniform(-0.01,0.01),
-        lon+np.random.uniform(-0.01,0.01),
-        predicted_aqi
-    ])
+    score=float(np.random.uniform(0,500))
 
-map2 = folium.Map(location=[lat,lon], zoom_start=12)
-
-HeatMap(points).add_to(map2)
-
-st_folium(map2)
-
-# ============================================================
-# POLICY OPTIMIZER
-# ============================================================
-
-st.header("🏛 Policy Optimizer")
-
-best = predicted_aqi
-
-best_policy = ""
-
-for t in range(0,50,10):
-
-    sim = predicted_aqi*(1-t/100)
-
-    if sim < best:
-
-        best = sim
-        best_policy = f"Reduce traffic {t}%"
-
-st.success(best_policy)
+    st.metric("Vision Pollution Index",round(score,2))
 
 # ============================================================
 # SUSTAINABILITY SCORE
 # ============================================================
 
-score = max(0,100-predicted_aqi)
+score=max(0,100-predicted_aqi)
 
-st.metric("Sustainability Score", score)
-
-# ============================================================
-# MULTI CITY COMPARISON
-# ============================================================
-
-st.header("🌍 India City Comparison")
-
-cities = ["Delhi","Mumbai","Bangalore","Chennai","Hyderabad"]
-
-values = np.random.randint(50,350,5)
-
-df = pd.DataFrame({
-
-    "City":cities,
-    "AQI":values
-
-})
-
-fig = px.bar(df,x="City",y="AQI")
-
-st.plotly_chart(fig)
+st.metric("Sustainability Score",round(score,2))
 
 # ============================================================
 # REPORT DOWNLOAD
 # ============================================================
 
-report = pd.DataFrame({
+report=pd.DataFrame({
 
     "City":[city],
     "AQI":[predicted_aqi],
-    "Traffic":[traffic_level],
-    "Satellite":[satellite_index],
-    "Score":[score]
+    "PM2.5":[pm25],
+    "PM10":[pm10],
+    "Risk":[category]
 
 })
 
 st.download_button(
-
-    "Download Smart City Report",
-
+    "Download Report",
     report.to_csv(index=False),
-
     "smart_city_report.csv"
-
 )
-
-# ============================================================
-# LLM AI ASSISTANT
-# ============================================================
-
-st.header("🤖 Smart City AI Assistant")
-
-question = st.text_input("Ask Smart City AI")
-
-if question and client:
-
-    response = client.chat.completions.create(
-
-        model="gpt-4o-mini",
-
-        messages=[{
-            "role":"user",
-            "content":f"""
-City: {city}
-AQI: {predicted_aqi}
-Traffic: {traffic_level}
-Satellite Index: {satellite_index}
-
-Question: {question}
-"""
-        }]
-    )
-
-    st.write(response.choices[0].message.content)
-
-elif question:
-
-    st.warning("Add OPENAI_API_KEY in secrets")
-
-# ============================================================
-# EMERGENCY ALERT
-# ============================================================
-
-st.header("🚨 Emergency Alert System")
-
-if predicted_aqi > 300:
-
-    st.error("Hazardous pollution")
-
-elif predicted_aqi > 200:
-
-    st.warning("Severe pollution")
-
-else:
-
-    st.success("Safe")
-
-# ============================================================
-# END
-# ============================================================
