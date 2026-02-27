@@ -261,7 +261,7 @@ Give smart city recommendation.
     ]
 )
 
-st.write(response.choices[0].message.content)
+    st.write(response.choices[0].message.content)
 
     st.write(response["choices"][0]["message"]["content"])
 
