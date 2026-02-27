@@ -9,7 +9,7 @@ import numpy as np
 import requests
 import folium
 import pytz
-import openai
+from openai import OpenAI
 
 from streamlit_folium import st_folium
 from datetime import datetime
@@ -37,7 +37,7 @@ st.caption(datetime.now(ist).strftime("%d %b %Y | %H:%M:%S IST"))
 # ============================================================
 
 OPENWEATHER_KEY = st.secrets["OPENWEATHER_API_KEY"]
-OPENAI_KEY = st.secrets["OPENAI_API_KEY"]
+client = OpenAI(api_key=OPENAI_KEY)
 
 openai.api_key = OPENAI_KEY
 
@@ -254,15 +254,14 @@ User question: {question}
 Give smart city recommendation.
 """
 
-    response=openai.ChatCompletion.create(
+    response = client.chat.completions.create(
+    model="gpt-4o-mini",
+    messages=[
+        {"role": "user", "content": prompt}
+    ]
+)
 
-        model="gpt-4",
-
-        messages=[
-            {"role":"user","content":prompt}
-        ]
-
-    )
+st.write(response.choices[0].message.content)
 
     st.write(response["choices"][0]["message"]["content"])
 
