@@ -11,6 +11,9 @@ import folium
 import pytz
 from openai import OpenAI
 
+OPENAI_KEY = st.secrets["OPENAI_API_KEY"]
+client = OpenAI(api_key=OPENAI_KEY)
+
 from streamlit_folium import st_folium
 from datetime import datetime
 
