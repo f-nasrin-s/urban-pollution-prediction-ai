@@ -2,6 +2,7 @@ streamlit
 numpy
 pandas
 plotly
-scikit-learn
 folium
 streamlit-folium
+scikit-learn
+requests
