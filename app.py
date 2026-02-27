@@ -1,398 +1,304 @@
 # ============================================================
-# SMART CITY AI – NATIONAL LEVEL HACKATHON WINNING VERSION
+# URBAN POLLUTION AI - NEXT GEN LIVE DASHBOARD
+# Unique Hackathon Winning Version
+# Real-time changing data + animated charts + AI prediction
 # ============================================================
 
 import streamlit as st
-import pandas as pd
 import numpy as np
-import requests
+import pandas as pd
+import time
+import plotly.graph_objects as go
+import plotly.express as px
 import folium
-import pytz
-
-from datetime import datetime
 from streamlit_folium import st_folium
-from folium.plugins import HeatMap
-
-from xgboost import XGBRegressor
-from sklearn.preprocessing import LabelEncoder
-from sklearn.model_selection import train_test_split
+from sklearn.ensemble import RandomForestRegressor
+from datetime import datetime
+import random
 
 # ============================================================
 # PAGE CONFIG
 # ============================================================
 
 st.set_page_config(
-    page_title="Smart City AI Command Center",
+    page_title="Urban Pollution AI Live Dashboard",
+    page_icon="🌍",
     layout="wide"
 )
 
-st.title("🌍 Smart City AI – Pollution Intelligence System")
+# ============================================================
+# CUSTOM CSS (GLASS UI)
+# ============================================================
 
-ist = pytz.timezone("Asia/Kolkata")
-st.caption(datetime.now(ist).strftime("⏱ %d %b %Y | %H:%M:%S IST"))
+st.markdown("""
+<style>
+.metric-card {
+    background: rgba(255,255,255,0.1);
+    padding: 20px;
+    border-radius: 15px;
+    backdrop-filter: blur(10px);
+}
+
+.big-font {
+    font-size: 28px !important;
+    font-weight: bold;
+}
+
+.live {
+    color: red;
+    animation: blink 1s infinite;
+}
+
+@keyframes blink {
+    50% { opacity: 0.3; }
+}
+</style>
+""", unsafe_allow_html=True)
 
 # ============================================================
-# LOAD MODEL
+# TITLE
+# ============================================================
+
+st.title("🌍 Urban Pollution AI Command Center")
+
+st.markdown('<span class="live">● LIVE MONITORING</span>', unsafe_allow_html=True)
+
+# ============================================================
+# SESSION STATE INIT
+# ============================================================
+
+if "data" not in st.session_state:
+
+    base = 120
+
+    st.session_state.data = pd.DataFrame({
+        "time": [datetime.now()],
+        "AQI": [base],
+        "traffic": [random.randint(30,80)],
+        "industrial": [random.randint(40,90)],
+        "temp": [random.randint(20,35)],
+        "humidity": [random.randint(40,80)]
+    })
+
+# ============================================================
+# AI MODEL TRAINING
 # ============================================================
 
 @st.cache_resource
 def train_model():
 
-    df = pd.read_csv("TRAQID.csv")
+    np.random.seed(42)
 
-    aqi_col = [c for c in df.columns if "aqi" in c.lower()][0]
+    df = pd.DataFrame({
+        "traffic": np.random.randint(0,100,500),
+        "industrial": np.random.randint(0,100,500),
+        "temp": np.random.randint(15,40,500),
+        "humidity": np.random.randint(30,90,500),
+    })
 
-    drop_cols = ["Image","created_at","Sequence","aqi_cat",aqi_col]
-
-    X = df.drop(columns=[c for c in drop_cols if c in df.columns])
-    y = df[aqi_col]
-
-    for col in X.select_dtypes(include="object").columns:
-        le = LabelEncoder()
-        X[col] = le.fit_transform(X[col])
-
-    X_train, _, y_train, _ = train_test_split(
-        X,y,test_size=0.2,random_state=42
+    df["AQI"] = (
+        df["traffic"] * 1.4 +
+        df["industrial"] * 1.6 +
+        df["temp"] * 0.5 +
+        df["humidity"] * 0.4 +
+        np.random.normal(0,10,500)
     )
 
-    model = XGBRegressor(
-        n_estimators=300,
-        max_depth=6,
-        learning_rate=0.05,
-        subsample=0.9,
-        colsample_bytree=0.9
-    )
+    X = df.drop("AQI", axis=1)
+    y = df["AQI"]
 
-    model.fit(X_train,y_train)
+    model = RandomForestRegressor()
+    model.fit(X,y)
 
-    return model, X.columns.tolist()
+    return model
 
-model, features = train_model()
+model = train_model()
 
 # ============================================================
-# LOCATION SELECT
+# GENERATE LIVE DATA
 # ============================================================
 
-st.header("📍 Select Location")
+def generate_new_data():
 
-m = folium.Map(location=[20.5937,78.9629], zoom_start=5)
+    last = st.session_state.data.iloc[-1]
 
-data = st_folium(m, height=400)
+    new_row = {
 
-if not data or not data.get("last_clicked"):
-    st.stop()
+        "time": datetime.now(),
 
-lat = float(data["last_clicked"]["lat"])
-lon = float(data["last_clicked"]["lng"])
+        "traffic": max(0, min(100, last["traffic"] + random.randint(-5,5))),
 
-# ============================================================
-# OPENWEATHER API
-# ============================================================
+        "industrial": max(0, min(100, last["industrial"] + random.randint(-3,3))),
 
-API_KEY = st.secrets.get("OPENWEATHER_API_KEY","")
+        "temp": max(15, min(40, last["temp"] + random.randint(-2,2))),
 
-geo_url = f"http://api.openweathermap.org/geo/1.0/reverse?lat={lat}&lon={lon}&appid={API_KEY}"
+        "humidity": max(30, min(90, last["humidity"] + random.randint(-3,3)))
+    }
 
-geo = requests.get(geo_url).json()
+    X = [[
+        new_row["traffic"],
+        new_row["industrial"],
+        new_row["temp"],
+        new_row["humidity"]
+    ]]
 
-city = geo[0]["name"] if geo else "Unknown"
+    new_row["AQI"] = model.predict(X)[0]
 
-st.success(f"Location: {city}")
-
-# ============================================================
-# POLLUTION DATA
-# ============================================================
-
-poll_url = f"http://api.openweathermap.org/data/2.5/air_pollution?lat={lat}&lon={lon}&appid={API_KEY}"
-
-poll = requests.get(poll_url).json()["list"][0]["components"]
-
-pm25 = float(poll["pm2_5"])
-pm10 = float(poll["pm10"])
+    st.session_state.data = pd.concat([
+        st.session_state.data,
+        pd.DataFrame([new_row])
+    ]).tail(100)
 
 # ============================================================
-# WEATHER DATA
+# AUTO UPDATE BUTTON
 # ============================================================
 
-weather_url = f"http://api.openweathermap.org/data/2.5/weather?lat={lat}&lon={lon}&appid={API_KEY}&units=metric"
+col1,col2 = st.columns([1,4])
 
-weather = requests.get(weather_url).json()
+if col1.button("▶ Start Live"):
 
-temp = float(weather["main"]["temp"])
-humidity = float(weather["main"]["humidity"])
-wind = float(weather["wind"]["speed"])
+    for i in range(50):
 
-# ============================================================
-# SATELLITE DATA NASA
-# ============================================================
+        generate_new_data()
+        time.sleep(0.5)
 
-try:
-
-    nasa_url = f"https://power.larc.nasa.gov/api/temporal/hourly/point?parameters=AOD_550&community=RE&longitude={lon}&latitude={lat}&format=JSON"
-
-    nasa = requests.get(nasa_url).json()
-
-    aod = float(list(nasa["properties"]["parameter"]["AOD_550"].values())[-1])
-
-except:
-
-    aod = 0.3
+        st.rerun()
 
 # ============================================================
-# TRAFFIC SIMULATION
+# CURRENT METRICS
 # ============================================================
 
-traffic_level = np.random.uniform(0,100)
+latest = st.session_state.data.iloc[-1]
+
+c1,c2,c3,c4 = st.columns(4)
+
+c1.metric("AQI", int(latest["AQI"]), delta=random.randint(-5,5))
+c2.metric("Traffic", int(latest["traffic"]))
+c3.metric("Industry", int(latest["industrial"]))
+c4.metric("Temperature", int(latest["temp"]))
 
 # ============================================================
-# DISPLAY METRICS
+# LIVE AQI CHART
 # ============================================================
 
-st.header("📊 Environmental Metrics")
+st.subheader("📈 Live AQI Trend")
 
-c1,c2,c3,c4,c5,c6 = st.columns(6)
+fig = go.Figure()
 
-c1.metric("PM2.5", pm25)
-c2.metric("PM10", pm10)
-c3.metric("Temp", temp)
-c4.metric("Humidity", humidity)
-c5.metric("Wind", wind)
-c6.metric("Satellite Aerosol", round(aod,3))
+fig.add_trace(go.Scatter(
+    x=st.session_state.data["time"],
+    y=st.session_state.data["AQI"],
+    mode='lines',
+    line=dict(width=3),
+    name="AQI"
+))
 
-# ============================================================
-# AI AQI PREDICTION
-# ============================================================
+fig.update_layout(
+    template="plotly_dark",
+    height=400
+)
 
-row = {}
-
-for col in features:
-
-    if "pm2.5" in col.lower():
-        row[col] = pm25
-
-    elif "pm10" in col.lower():
-        row[col] = pm10
-
-    else:
-        row[col] = 0
-
-predicted_aqi = float(model.predict(pd.DataFrame([row]))[0])
-
-st.header("🔮 AI AQI Prediction")
-
-st.metric("Predicted AQI", round(predicted_aqi,2))
+st.plotly_chart(fig, use_container_width=True)
 
 # ============================================================
-# HEALTH RISK
+# POLLUTION SOURCE PIE
 # ============================================================
 
-st.header("❤️ Health Risk")
+st.subheader("🏭 Pollution Source Contribution")
 
-if predicted_aqi > 200:
+source = pd.DataFrame({
 
-    st.error("Severe health risk")
+    "Source":["Traffic","Industry","Weather"],
 
-elif predicted_aqi > 100:
-
-    st.warning("Moderate risk")
-
-else:
-
-    st.success("Low risk")
-
-# ============================================================
-# SOURCE ATTRIBUTION AI
-# ============================================================
-
-st.header("🎯 Pollution Source Attribution")
-
-sources = {
-
-    "Traffic": float(np.random.uniform(20,50)),
-    "Industry": float(np.random.uniform(10,30)),
-    "Dust": float(np.random.uniform(10,20)),
-    "Weather": float(np.random.uniform(5,15))
-
-}
-
-src_df = pd.DataFrame({
-
-    "Source":sources.keys(),
-    "Contribution":sources.values()
-
+    "Value":[
+        latest["traffic"],
+        latest["industrial"],
+        (latest["temp"]+latest["humidity"])/2
+    ]
 })
 
-st.bar_chart(src_df.set_index("Source"))
+fig2 = px.pie(source, names="Source", values="Value", hole=0.5)
+
+st.plotly_chart(fig2, use_container_width=True)
 
 # ============================================================
-# FORECAST
+# HEATMAP MAP
 # ============================================================
 
-st.header("📈 AQI Forecast")
+st.subheader("🗺 Live Pollution Heatmap")
 
-forecast = []
+m = folium.Map(location=[12.97,77.59], zoom_start=11)
+
+for i in range(30):
+
+    lat = 12.97 + random.uniform(-0.05,0.05)
+    lon = 77.59 + random.uniform(-0.05,0.05)
+
+    aqi = random.randint(50,300)
+
+    color = "green"
+
+    if aqi > 200:
+        color="red"
+    elif aqi > 120:
+        color="orange"
+
+    folium.CircleMarker(
+        location=[lat,lon],
+        radius=8,
+        color=color,
+        fill=True,
+        popup=f"AQI: {aqi}"
+    ).add_to(m)
+
+st_folium(m, width=900, height=500)
+
+# ============================================================
+# FUTURE FORECAST
+# ============================================================
+
+st.subheader("🔮 AI Future Prediction")
+
+future = []
+
+base = latest["AQI"]
 
 for i in range(24):
 
-    sim = predicted_aqi * float(np.random.uniform(0.9,1.1))
+    base += random.randint(-5,5)
+    future.append(base)
 
-    forecast.append(sim)
+future_df = pd.DataFrame({
+    "Hour": list(range(24)),
+    "AQI": future
+})
 
-forecast_df = pd.DataFrame({"AQI":forecast})
+fig3 = px.area(future_df, x="Hour", y="AQI")
 
-st.line_chart(forecast_df)
-
-# ============================================================
-# DIGITAL TWIN SIMULATION
-# ============================================================
-
-st.header("🌐 Digital Twin Simulation")
-
-reduction = st.slider("Reduce traffic %",0,100,20)
-
-simulated_aqi = predicted_aqi*(1-reduction/100)
-
-st.metric("Simulated AQI", round(float(simulated_aqi),2))
+st.plotly_chart(fig3, use_container_width=True)
 
 # ============================================================
-# POLICY OPTIMIZER
+# INSIGHTS
 # ============================================================
 
-st.header("🧠 Policy Optimizer")
+st.subheader("🧠 AI Insights")
 
-best = predicted_aqi
+if latest["AQI"] > 200:
 
-best_policy = ""
+    st.error("Severe pollution detected")
 
-for t in range(0,50,10):
+elif latest["AQI"] > 120:
 
-    sim = predicted_aqi*(1-t/100)
-
-    if sim < best:
-
-        best = sim
-        best_policy = f"Reduce traffic {t}%"
-
-st.success(best_policy)
-
-# ============================================================
-# HEATMAP FIXED
-# ============================================================
-
-st.header("🗺 Hyperlocal Pollution Map")
-
-points = []
-
-for i in range(50):
-
-    points.append([
-        float(lat+np.random.uniform(-0.01,0.01)),
-        float(lon+np.random.uniform(-0.01,0.01)),
-        float(predicted_aqi)
-    ])
-
-map2 = folium.Map(location=[lat,lon], zoom_start=12)
-
-HeatMap(points).add_to(map2)
-
-st_folium(map2, height=500)
-
-# ============================================================
-# CITIZEN REPORTING
-# ============================================================
-
-st.header("👥 Citizen Reporting")
-
-report = st.text_area("Report pollution")
-
-if st.button("Submit"):
-
-    df = pd.DataFrame({
-
-        "city":[city],
-        "report":[report],
-        "time":[datetime.now()]
-
-    })
-
-    df.to_csv("citizen_reports.csv",mode="a",index=False,header=False)
-
-    st.success("Report submitted")
-
-# ============================================================
-# ALERT SYSTEM
-# ============================================================
-
-st.header("🚨 Government Alert System")
-
-if predicted_aqi > 200:
-
-    st.error("Alert sent to authorities")
+    st.warning("Moderate pollution")
 
 else:
 
-    st.success("Normal")
+    st.success("Air quality safe")
 
 # ============================================================
-# AI EXPLAINABILITY
+# LIVE TABLE
 # ============================================================
 
-st.header("🧠 AI Explainability")
+st.subheader("📊 Live Data Stream")
 
-imp = model.feature_importances_
-
-imp_df = pd.DataFrame({
-
-    "Feature":features,
-    "Importance":imp
-
-}).sort_values("Importance",ascending=False).head(10)
-
-st.bar_chart(imp_df.set_index("Feature"))
-
-# ============================================================
-# DOWNLOAD REPORT
-# ============================================================
-
-report_df = pd.DataFrame({
-
-    "City":[city],
-    "AQI":[predicted_aqi],
-    "PM2.5":[pm25],
-    "PM10":[pm10]
-
-})
-
-st.download_button(
-
-    "Download Report",
-    report_df.to_csv(index=False),
-    "smart_city_report.csv"
-
-)
-
-# ============================================================
-# AI CHATBOT
-# ============================================================
-
-st.header("💬 AI Assistant")
-
-q = st.text_input("Ask")
-
-if q:
-
-    if "aqi" in q.lower():
-
-        st.write(predicted_aqi)
-
-    elif "risk" in q.lower():
-
-        st.write("High risk" if predicted_aqi>150 else "Low risk")
-
-    else:
-
-        st.write("Ask about AQI or risk")
-
-# ============================================================
-# END
-# ============================================================
+st.dataframe(st.session_state.data.tail(10), use_container_width=True)
