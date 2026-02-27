@@ -1,9 +1,7 @@
 streamlit
-pandas
 numpy
-requests
+pandas
+plotly
+scikit-learn
 folium
 streamlit-folium
-xgboost
-scikit-learn
-pytz
