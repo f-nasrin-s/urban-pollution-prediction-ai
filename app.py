@@ -9,9 +9,13 @@ import numpy as np
 import requests
 import folium
 import pytz
+
 from openai import OpenAI
 
+# Load API key safely
 OPENAI_KEY = st.secrets["OPENAI_API_KEY"]
+
+# Create OpenAI client
 client = OpenAI(api_key=OPENAI_KEY)
 
 from streamlit_folium import st_folium
